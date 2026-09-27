@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Speer: survey regression residuals by county</title>
+<title>SPEER: survey regression residuals by county</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,600;0,800;1,400&display=swap" rel="stylesheet">
@@ -12,7 +12,7 @@
 <body>
 
 <header class="masthead">
-  <h1>Speer</h1>
+  <h1>SPEER</h1>
   <p>Regress survey answers on respondent characteristics, map what the model leaves unexplained by county, and compare it with each county's weather record.</p>
   <p class="privacy">Your survey file is read in this browser tab only. Nothing is uploaded.</p>
 </header>
@@ -153,6 +153,12 @@
   <p>County outlines: us-atlas (Census cartographic boundaries). ZIP to county: Census 2020 and 2010 ZCTA–county relationship files and the John Snow, Inc. ZIP–ZCTA crosswalk. Weather: NOAA Storm Events, NOAA nClimDiv, OpenFEMA. See the README for how the county tables are built.</p>
   <p>Heather Bedle, University of Oklahoma. CC BY-SA 4.0.</p>
 </footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden>
+  <span class="spinner" aria-hidden="true"></span>
+  <span id="toast-msg"></span>
+  <button type="button" id="toast-close" aria-label="Dismiss message">×</button>
+</div>
 
 <script src="vendor/d3.min.js"></script>
 <script src="vendor/topojson-client.min.js"></script>

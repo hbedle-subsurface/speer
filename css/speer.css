@@ -135,7 +135,7 @@ input[type=range] { accent-color: var(--storm); width: 100%; }
 #map .county.hover { stroke: var(--ink); stroke-width: 1.2; }
 #map .states { fill: none; stroke: #fff; stroke-width: 1.1; }
 #map .nation { fill: none; stroke: var(--slate); stroke-width: 0.6; }
-.map-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--slate); pointer-events: none; }
+.map-empty { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); max-width: 90%; padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.92); border: 1px solid var(--rule); color: var(--ink); font-size: 13px; text-align: center; pointer-events: none; }
 .tip {
   position: absolute; pointer-events: none; z-index: 5;
   background: var(--ink); color: #fff; font-size: 12px; line-height: 1.4;
@@ -178,3 +178,18 @@ tr.sig td:first-child { box-shadow: inset 3px 0 0 var(--storm); }
   .masthead { padding: 20px 16px 16px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* ---------- progress toast ---------- */
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 20;
+  display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 12px 10px 16px; border-radius: var(--radius-m);
+  background: var(--ink); color: #fff; font-size: 14px; box-shadow: 0 4px 16px rgba(27, 36, 41, 0.25);
+}
+.toast.done { background: var(--storm); }
+.toast.fail { background: var(--heat); }
+.toast button { border: 0; background: transparent; color: #fff; font-size: 18px; line-height: 1; padding: 0 4px; }
+.spinner { width: 16px; height: 16px; flex: none; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; animation: spin .8s linear infinite; }
+.toast:not(.busy) .spinner { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }

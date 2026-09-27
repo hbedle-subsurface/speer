@@ -1,6 +1,6 @@
-# Speer
+# SPEER
 
-Speer is a browser tool for survey data with respondent locations. It fits a regression of a survey answer on respondent characteristics, averages the residuals by US county, maps them, and compares the county residuals with each county's weather and disaster record.
+SPEER is a browser tool for survey data with respondent locations. It fits a regression of a survey answer on respondent characteristics, averages the residuals by US county, maps them, and compares the county residuals with each county's weather and disaster record.
 
 It was built for work on energy preferences and acceptance (solar, wind and other sources) in the 2024 SPEER survey (collected August 16 to October 16, 2024), with socioeconomic predictors at the respondent level and weather exposure over the preceding ten years (2014–2023) at the county level.
 
@@ -69,7 +69,7 @@ SPEER Q15 (`WxPerc_*`) asks whether four kinds of events happened more or less o
 | `WxPerc_ColdWinter` | `pc_winter_colder_f` (how much colder the December–February minimum was than in the baseline winters), `pc_coldwinter_days_more` (change in cold and winter storm event-days) |
 | `WxPerc_Droughts` | `pc_drought_area_more` (change in mean percent of county area in D1 or worse), `pc_drought_days_more` (change in drought event-days) |
 
-In Speer, a `WxPerc` item can be chosen as the outcome and its measured counterparts added as county predictors with county-clustered standard errors, which tests how closely perception follows the measured record once the socioeconomic predictors are held constant. The residual map then shows where people perceived more or less change than both their characteristics and their county's measured weather predict. Q16 (`WxFut_*`) asks about the next five years and has no measured counterpart.
+In SPEER, a `WxPerc` item can be chosen as the outcome and its measured counterparts added as county predictors with county-clustered standard errors, which tests how closely perception follows the measured record once the socioeconomic predictors are held constant. The residual map then shows where people perceived more or less change than both their characteristics and their county's measured weather predict. Q16 (`WxFut_*`) asks about the next five years and has no measured counterpart.
 
 Some properties of these sources that bear on interpretation:
 
@@ -95,8 +95,8 @@ vendor/                        d3 7.9.0, topojson-client 3.1.0, Papa Parse 5.7.0
 
 ## License and citation
 
-Speer is shared under the Creative Commons Attribution-ShareAlike 4.0 International license (CC BY-SA 4.0). Please cite it as:
+SPEER is shared under the Creative Commons Attribution-ShareAlike 4.0 International license (CC BY-SA 4.0). Please cite it as:
 
-Bedle, H. (2026). *Speer: survey regression residuals by county.* University of Oklahoma. https://hbedle-subsurface.github.io/Speer/
+Bedle, H. (2026). *SPEER: survey regression residuals by county.* University of Oklahoma. https://hbedle-subsurface.github.io/SPEER/
 
 Contact: Heather Bedle, hbedle@ou.edu, ORCID 0000-0003-3010-0195.

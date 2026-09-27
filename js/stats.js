@@ -1,4 +1,4 @@
-// Speer statistics: weighted least squares, weighted logistic regression,
+// SPEER statistics: weighted least squares, weighted logistic regression,
 // heteroskedasticity-robust (HC1) and county-clustered standard errors,
 // p-values, and Moran's I on county mean residuals.
 // No external dependencies. Matrices are arrays of row arrays.

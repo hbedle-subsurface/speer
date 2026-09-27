@@ -1,4 +1,4 @@
-"""Build data/zip_county.csv, the ZIP code to county lookup used by Speer.
+"""Build data/zip_county.csv, the ZIP code to county lookup used by SPEER.
 
 A copy of the output is already in data/, so this script is only needed to
 rebuild or check it.

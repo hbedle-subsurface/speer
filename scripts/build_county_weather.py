@@ -98,7 +98,7 @@ def fetch(url, name=None, binary=False):
     path = os.path.join(CACHE, name or re.sub(r"[^\w.-]", "_", url.split("//")[-1])[-150:])
     if not os.path.exists(path):
         print(f"  downloading {url}")
-        req = urllib.request.Request(url, headers={"User-Agent": "speer-county-weather/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "SPEER-county-weather/1.0"})
         with urllib.request.urlopen(req, timeout=180) as r, open(path, "wb") as f:
             f.write(r.read())
     data = open(path, "rb").read()
@@ -107,7 +107,7 @@ def fetch(url, name=None, binary=False):
 
 def listing(url):
     # directory listings change daily, so they are not cached
-    req = urllib.request.Request(url, headers={"User-Agent": "speer-county-weather/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "SPEER-county-weather/1.0"})
     with urllib.request.urlopen(req, timeout=60) as r:
         return r.read().decode("utf-8", errors="replace")
 

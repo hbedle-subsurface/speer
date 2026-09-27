@@ -1,9 +1,31 @@
-// Speer: survey regression, county residual map, county weather comparison.
+// SPEER: survey regression, county residual map, county weather comparison.
 (() => {
   const $ = id => document.getElementById(id);
   const fmt = (v, d = 3) => (v == null || !isFinite(v)) ? '–' : (+v).toFixed(d);
   const fmtP = p => (p == null || !isFinite(p)) ? '–' : p < 0.001 ? '<0.001' : p.toFixed(3);
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // ---------- progress and error messages ----------
+  const tick = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+  let doneTimer = null;
+  function busy(msg) {
+    clearTimeout(doneTimer);
+    const t = $('toast'); t.className = 'toast busy'; t.hidden = false;
+    $('toast-msg').textContent = msg;
+  }
+  function done(msg) {
+    const t = $('toast'); t.className = 'toast done'; t.hidden = false;
+    $('toast-msg').textContent = msg;
+    clearTimeout(doneTimer); doneTimer = setTimeout(() => { t.hidden = true; }, 4000);
+  }
+  function fail(msg) {
+    clearTimeout(doneTimer);
+    const t = $('toast'); t.className = 'toast fail'; t.hidden = false;
+    $('toast-msg').textContent = msg;
+  }
+  window.addEventListener('error', e => fail(`Something went wrong: ${e.message}. The page may need a reload.`));
+  window.addEventListener('unhandledrejection', e => fail(`Something went wrong: ${e.reason && e.reason.message || e.reason}. The page may need a reload.`));
+  document.addEventListener('click', e => { if (e.target.id === 'toast-close') $('toast').hidden = true; });
 
   const S = {
     rows: [], cols: [], fileName: '',
@@ -32,15 +54,25 @@
   }
 
   wireDrop('drop-survey', 'file-survey', file => {
+    const rows = []; let fields = null;
+    busy(`Reading ${file.name}…`);
     Papa.parse(file, {
-      header: true, skipEmptyLines: true, dynamicTyping: false,
-      complete: res => {
-        S.rows = res.data; S.cols = res.meta.fields.filter(c => c !== '' && c != null);
-        S.fileName = file.name;
-        $('survey-status').textContent = `${file.name}: ${S.rows.length.toLocaleString()} rows, ${S.cols.length} columns`;
-        onSurveyLoaded();
+      header: true, skipEmptyLines: true, dynamicTyping: false, chunkSize: 512 * 1024,
+      chunk: res => {
+        if (!fields) fields = res.meta.fields;
+        for (const r of res.data) rows.push(r);
+        busy(`Reading ${file.name}: ${rows.length.toLocaleString()} rows so far…`);
       },
-      error: err => { $('survey-status').innerHTML = `<span class="err">Could not read the file: ${esc(err.message)}</span>`; },
+      complete: async () => {
+        S.rows = rows; S.cols = (fields || []).filter(c => c !== '' && c != null);
+        S.fileName = file.name; S.fit = null;
+        $('survey-status').textContent = `${file.name}: ${S.rows.length.toLocaleString()} rows, ${S.cols.length} columns`;
+        await onSurveyLoaded();
+      },
+      error: err => {
+        $('survey-status').innerHTML = `<span class="err">Could not read the file: ${esc(err.message)}</span>`;
+        fail(`Could not read ${file.name}: ${err.message}`);
+      },
     });
   });
 
@@ -85,7 +117,7 @@
     if (pick && opts.includes(pick)) sel.value = pick;
   }
 
-  function onSurveyLoaded() {
+  async function onSurveyLoaded() {
     $('step-place').removeAttribute('data-locked');
     $('step-model').removeAttribute('data-locked');
     const find = re => S.cols.find(c => re.test(c));
@@ -96,8 +128,17 @@
     fillSelect($('dv-col'), S.cols, { none: 'Choose a column' });
     fillSelect($('wt-col'), S.cols, { none: 'None (unweighted)', pick: S.cols.find(c => /^weight|wt$|_wt|weight_/i.test(c)) });
     S.ivOn.clear(); S.ivKind = {};
+    busy(`Checking ${S.cols.length} columns…`); await tick();
     refreshIvKinds();
-    placeRespondents();
+    busy('Placing respondents in counties…'); await tick();
+    await placeRespondents();
+    // show where respondents are while no model is fitted
+    S.county = new Map();
+    S.rowFips.forEach(f => { if (!f) return; const c = S.county.get(f) || { n: 0 }; c.n++; S.county.set(f, c); });
+    $('map-layer').value = 'n'; drawMap();
+    $('map-empty').hidden = false;
+    $('map-empty').textContent = 'Respondents per county. Choose an outcome and predictors in step 4, then press Fit model.';
+    done(`Loaded ${S.rows.length.toLocaleString()} respondents. Next: step 4, then Fit model.`);
   }
 
   function refreshIvKinds() {
@@ -235,6 +276,7 @@
 
   // ---------------- weather table ----------------
   async function loadDefaultWeather() {
+    busy('Loading the county weather table…');
     try {
       const txt = await (await fetch('data/county_weather.csv')).text();
       if (!/^fips/i.test(txt.trim())) throw new Error('missing');
@@ -244,7 +286,9 @@
           Papa.parse(dtxt, { header: true, skipEmptyLines: true }).data.forEach(r => S.wxDesc[r.variable] = r.description);
       } catch (e) { /* dictionary optional */ }
       setWeather(Papa.parse(txt, { header: true, skipEmptyLines: true }), 'data/county_weather.csv');
+      $('toast').hidden = true;
     } catch (e) {
+      $('toast').hidden = true;
       $('weather-status').innerHTML = 'No county weather table in data/ yet. Build it with scripts/build_county_weather.py, or load any CSV with a <b>fips</b> column plus numeric county variables.';
     }
   }
@@ -282,17 +326,23 @@
   // ---------------- model ----------------
   $('fit').addEventListener('click', fitModel);
 
-  function fitModel() {
+  async function fitModel() {
+    busy('Fitting the model…'); await tick();
+    try { if (await fitModelInner() !== false) done('Model fitted. The map shows the residuals.'); }
+    catch (e) { fail(`The model could not be fitted: ${e.message}`); }
+  }
+
+  async function fitModelInner() {
     const status = $('model-status');
     const dv = $('dv-col').value, wt = $('wt-col').value, kind = dvKind();
     const ivs = S.cols.filter(c => S.ivOn.has(c) && c !== dv && c !== wt);
     const useWx = $('add-weather').checked ? [...S.wxOn] : [];
     const cluster = $('se-kind').value === 'cluster';
-    if (!dv) { status.innerHTML = '<span class="err">Choose an outcome column.</span>'; return; }
-    if (!ivs.length && !useWx.length) { status.innerHTML = '<span class="err">Tick at least one predictor.</span>'; return; }
+    if (!dv) { status.innerHTML = '<span class="err">Choose an outcome column.</span>'; $('toast').hidden = true; return false; }
+    if (!ivs.length && !useWx.length) { status.innerHTML = '<span class="err">Tick at least one predictor.</span>'; $('toast').hidden = true; return false; }
     const ones = new Set([...document.querySelectorAll('#dv-ones-list input:checked')].map(i => i.value));
-    if (kind === 'logit' && !ones.size) { status.innerHTML = '<span class="err">Tick the answers that count as yes.</span>'; return; }
-    if ($('add-weather').checked && !useWx.length) { status.innerHTML = '<span class="err">Tick weather variables in step 3, or untick “Add selected weather variables”.</span>'; return; }
+    if (kind === 'logit' && !ones.size) { status.innerHTML = '<span class="err">Tick the answers that count as yes.</span>'; $('toast').hidden = true; return false; }
+    if ($('add-weather').checked && !useWx.length) { status.innerHTML = '<span class="err">Tick weather variables in step 3, or untick “Add selected weather variables”.</span>'; $('toast').hidden = true; return false; }
     const needCounty = cluster || useWx.length > 0;
     const miss = missingSet();
 
@@ -300,7 +350,7 @@
     const levels = {};
     for (const c of ivs) if (S.ivKind[c] === 'category') {
       const d = distinctValues(c, miss, 200);
-      if (d.size > 60) { status.innerHTML = `<span class="err">${esc(c)} has more than 60 answers. Mark it as a number or leave it out.</span>`; return; }
+      if (d.size > 60) { status.innerHTML = `<span class="err">${esc(c)} has more than 60 answers. Mark it as a number or leave it out.</span>`; $('toast').hidden = true; return false; }
       const sorted = [...d.entries()].sort((a, b) => b[1] - a[1]);
       levels[c] = { ref: sorted[0][0], others: sorted.slice(1).map(e => e[0]).sort((a, b) => (isFinite(a) && isFinite(b)) ? a - b : a.localeCompare(b)) };
     }
@@ -336,7 +386,7 @@
       }
       X.push(x); y.push(yi); w.push(wi); cl.push(fips); idx.push(i);
     });
-    if (X.length < 10) { status.innerHTML = `<span class="err">Only ${X.length} complete rows. Check the missing codes and predictor types.</span>`; return; }
+    if (X.length < 10) { status.innerHTML = `<span class="err">Only ${X.length} complete rows. Check the missing codes and predictor types.</span>`; $('toast').hidden = true; return false; }
 
     // drop dummy columns that never vary in the complete rows
     const keep = names.map((_, j) => j === 0 || X.some(r => r[j] !== X[0][j]));
@@ -344,7 +394,7 @@
     const namesK = names.filter((_, j) => keep[j]);
 
     const res = (kind === 'logit' ? Stats.logit : Stats.ols)(Xk, y, wt ? w : null, cluster ? cl : null);
-    if (res.error) { status.innerHTML = `<span class="err">${esc(res.error)}</span>`; return; }
+    if (res.error) { status.innerHTML = `<span class="err">${esc(res.error)}</span>`; $('toast').hidden = true; return false; }
 
     S.fit = { ...res, names: namesK, idx, w: wt ? w : null, dv, kind, ivs, useWx, cluster, dropped, noCounty, residSD: Math.sqrt(res.resid.reduce((s, e) => s + e * e, 0) / res.resid.length) };
     status.innerHTML = `Fitted on <b>${res.n.toLocaleString()}</b> respondents.` +
@@ -357,6 +407,8 @@
     const rg = $('range'); rg.max = Math.max(3, r0 * 3); rg.step = kind === 'logit' ? 0.01 : 0.05; rg.value = r0;
     $('range-out').textContent = fmt(r0, 2);
     renderCoefTable();
+    busy('Averaging residuals by county and smoothing the map…'); await tick();
+    if ($('map-layer').value === 'n') $('map-layer').value = 'smooth';
     aggregateCounties();
   }
 
@@ -521,7 +573,7 @@
     const tip = $('tip'), c = S.county.get(d.id);
     const st = S.stateName.get(d.id.slice(0, 2)) || '';
     let h = `<b>${esc(S.countyName.get(d.id) || d.id)}${st ? ', ' + esc(st) : ''}</b> (${d.id})<br>`;
-    h += c ? `${c.n} respondent${c.n > 1 ? 's' : ''}, mean residual ${c.mean > 0 ? '+' : ''}${fmt(c.mean)}` : 'No fitted respondents';
+    h += c ? `${c.n} respondent${c.n > 1 ? 's' : ''}` + (S.fit ? `, mean residual ${c.mean > 0 ? '+' : ''}${fmt(c.mean)}` : '') : (S.fit ? 'No fitted respondents' : 'No respondents');
     if (c && c.n < minN()) h += ' (below min n)';
     const L = layer();
     if (L === 'smooth' && S.fit) { const sm = smoothed().get(d.id); h += sm ? `<br>Smoothed ${sm.mean > 0 ? '+' : ''}${fmt(sm.mean)} from ${fmt(sm.neff, 1)} weighted respondents nearby` : '<br>No respondents within smoothing distance'; }
@@ -536,7 +588,12 @@
   function hideTip() { $('tip').hidden = true; countyPaths.classed('hover', false); }
 
   $('map-layer').addEventListener('change', drawMap);
-  $('bw').addEventListener('input', () => { $('bw-out').textContent = $('bw').value + ' km'; drawMap(); });
+  let bwTimer = null;
+  $('bw').addEventListener('input', () => {
+    $('bw-out').textContent = $('bw').value + ' km';
+    clearTimeout(bwTimer);
+    bwTimer = setTimeout(async () => { if (S.fit) { busy('Smoothing…'); await tick(); } drawMap(); if (S.fit) $('toast').hidden = true; }, 120);
+  });
   $('range').addEventListener('input', () => { $('range-out').textContent = fmt(+$('range').value, 2); drawMap(); drawCountyAnalysis(); });
   $('minn').addEventListener('input', () => {
     $('minn-out').textContent = $('minn').value; S.moran = null; $('moran-out').textContent = '';
@@ -570,7 +627,7 @@
     });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
-    a.download = `speer_counties_${S.fit.dv.replace(/\W+/g, '_')}_min${minN()}.csv`;
+    a.download = `SPEER_counties_${S.fit.dv.replace(/\W+/g, '_')}_min${minN()}.csv`;
     a.click(); URL.revokeObjectURL(a.href);
   });
 
@@ -633,7 +690,9 @@
   }
 
   // ---------------- start ----------------
+  busy('Loading the county map…');
   const mapReady = initMap();
+  mapReady.then(() => { $('toast').hidden = true; });
   placeRespondents();
   mapReady.then(loadDefaultWeather);
 })();
