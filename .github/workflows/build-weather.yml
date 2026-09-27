@@ -1,0 +1,42 @@
+name: Build county weather table
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "First year of the ten-year window"
+        default: "2014"
+      end:
+        description: "Last year of the ten-year window"
+        default: "2023"
+      perc_end:
+        description: "Last full month before the survey (YYYY-MM), for the perception-matched variables"
+        default: "2024-07"
+      perc_base_years:
+        description: "Years before that month used as 'the last few years'"
+        default: "5"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the county table
+        run: >
+          python scripts/build_county_weather.py
+          --start "${{ inputs.start }}" --end "${{ inputs.end }}"
+          --perc-end "${{ inputs.perc_end }}" --perc-base-years "${{ inputs.perc_base_years }}"
+      - name: Commit the table
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/county_weather.csv data/county_weather_dictionary.csv
+          git diff --cached --quiet || git commit -m "Build county weather table (${{ inputs.start }}-${{ inputs.end }}, perception window ending ${{ inputs.perc_end }})"
+          git push
