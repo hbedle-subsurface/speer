@@ -8,10 +8,10 @@ The survey file is read by the browser tab and never leaves the computer. No sur
 
 ## Workflow in the tool
 
-1. **Load the survey.** Drag in a CSV with one row per respondent. Codes such as 98 or 99 (refused, don't know) can be listed so they are treated as missing. Blank cells, `NA`, `.` and SPSS's `#NULL!` are always missing.
+1. **Load the survey.** Drag in a CSV or Excel file (first sheet) with one row per respondent. A computed column (A minus B, A plus B, A times B, A mean-centered or A standardized) can be added in the browser, for example `NRG_CCdiff` as `NRG_CC` minus `NRG_CCEQ`. Codes such as 98 or 99 (refused, don't know) can be listed so they are treated as missing. Blank cells, `NA`, `.` and SPSS's `#NULL!` are always missing.
 2. **Place respondents in counties.** Choose a ZIP code column or a county FIPS column. ZIP codes are matched through `data/zip_county.csv`, which ships with the repo. An optional state column is checked against each placement. Respondent locations are only ever used at the county level; the tool has no option to place people by coordinates.
 3. **County weather record.** `data/county_weather.csv` loads automatically. Any CSV with a `fips` column and numeric county variables can be loaded in its place.
-4. **Fit the respondent model.** Choose the outcome and predictors. Each predictor is entered either as a number (one slope) or as a category (one coefficient per answer, compared with the most common answer). Survey weights are optional.
+4. **Fit the respondent model.** Choose the outcome and predictors. A predictor set fills in a standard list of predictors, with display labels and the survey weight, in one step; the SPEER standard controls load automatically when the file contains them. Sets are defined in `js/presets.js`, which can be edited on GitHub, and any set of ticked predictors can also be saved in the browser (column names only). Results appear as a coefficient table with 95% confidence intervals and a bar chart of t values colored by p-value band, and the table can be downloaded as CSV. Each predictor is entered either as a number (one slope) or as a category (one coefficient per answer, compared with the most common answer). Survey weights are optional.
 
 The map opens on a smoothed residual surface that fills in unsampled counties (see Smoothing below). It can also show the raw weighted mean residual in each county that has at least the chosen number of respondents. The color range is set with a slider and does not rescale when the minimum count changes, so the same color means the same residual throughout a session. The map can also show respondent counts or any weather variable.
 
@@ -21,11 +21,56 @@ The lower right panel plots county mean residuals against one weather variable a
 
 The SPEER energy items run in different directions. `NRG_Solar`, `NRG_Wind` and `NRG_Nuclear` are coded 1 = very favorable to 6 = very unfavorable, and `NRG_HC` 1 = strongly agree to 6 = strongly disagree that hydrocarbons should stay in the energy mix. The `_l` versions reverse these (7 minus the answer), so higher values mean more favorable toward solar, wind and nuclear, and more agreement that hydrocarbons should continue. `NRG_CC` (carbon capture research) is already coded 1 = strongly oppose to 6 = strongly favor. A positive county residual means respondents there scored higher on whichever coding is chosen than the model predicts.
 
+## Analysis tabs
+
+Below the map, the results are arranged in tabs.
+
+- **Model.** The outcome's distribution and summary statistics, the respondent model as a chart of t values or of coefficients with 95% intervals, colored by p-value band, the coefficient table, and collinearity diagnostics (variance inflation factors and the condition number, computed unweighted as in statsmodels).
+- **Interaction.** Adds a moderator, a second variable (optionally mean-centered) and their product to the current model, lists the key terms, and plots the predicted outcome across the second variable for each level of the moderator (each category, 0 and 1 for a dummy, or the mean and ±1 SD for a continuous moderator), with the other predictors held at their weighted means and 95% intervals from the model's covariance matrix. For a logistic model the lines are predicted probabilities.
+- **Group comparison.** The weighted percent of respondents at or above (or at or below) a cut-off on one or more items, by group, as clustered bars on a fixed 0–100% axis. Group labels such as `1=Democrat, 2=Independent, 3=Republican` can be typed in; party labels take blue, gray and red.
+- **Correlations.** Pearson correlations among the outcome and the current predictors on complete rows.
+- **SHAP.** A boosted tree model of the outcome, or of the respondent model's residuals, with SHAP values for each feature, SHAP interaction values for pairs of features, and a link from any pair to the Interaction tab for a regression test (see below).
+- **County and weather.** County mean residuals against the county weather record.
+
+## SHAP
+
+SHAP (SHapley Additive exPlanations; Lundberg and Lee, 2017) divides a model's prediction for each respondent among the features that went into it, so that the contributions add up to the prediction. In SPEER, SHAP is used alongside the regression for two purposes: to look for factors the regression is missing, and to look for interactions worth testing. In both, SHAP points to candidates, and the regression tests them.
+
+### Model and SHAP values
+
+The SHAP tab fits gradient-boosted regression trees (Friedman, 2001) with squared-error loss. Splits are chosen by second-order gain with an L2 penalty on leaf values, as in XGBoost (Chen and Guestrin, 2016), on features binned to at most 64 values; the trees are written for SPEER (`js/boost.js`) and are not XGBoost itself. Settings are the number of trees (default 200), depth (3), learning rate (0.05), row subsample per tree (0.8), minimum child weight (10) and the L2 penalty (1). Survey weights, if used, are the sample weights in fitting. A random share of respondents (default 20%) is held out, and R² is reported on both the held-out and the training rows. Each run uses its own seed for the holdout split and the row subsampling, and the default of three runs shows how much the results move between fits.
+
+SHAP values are computed with the path-dependent TreeSHAP algorithm (Lundberg, Erion and Lee, 2018; Lundberg et al., 2020), which gives exact Shapley values for tree ensembles using the share of training data reaching each node (`js/treeshap.js`). This is the default of `shap.TreeExplainer` for tree models without background data (`feature_perturbation="tree_path_dependent"`). Node shares are recomputed from the full training sample after each tree is grown. SHAP interaction values (Lundberg et al., 2020) are computed exactly for a random sample of respondents (default 300), since they take roughly twice the number of features as long as ordinary SHAP values.
+
+### Displays
+
+- **Mean absolute SHAP value** for each feature, averaged over runs, with whiskers for the range across runs, and colored by whether the feature is in the respondent model or is an added candidate.
+- **SHAP values for each respondent** (the summary or beeswarm plot), colored by the respondent's value of the feature.
+- **Dependence plot** of one feature's SHAP values against its values, colored by a second feature.
+- **Interaction matrix** of mean absolute SHAP interaction values (off-diagonal entries doubled, since each pair's interaction is split between two cells), and the ten strongest pairs, each of which can be sent to the Interaction tab.
+
+The SHAP axes in the summary and dependence plots share one fixed range per fit, so the spread of different features can be compared directly.
+
+### Two targets
+
+With the outcome as the target, the trees see the respondent-model predictors and any added candidates, and SHAP shows which features the tree model relies on. With the residuals of the fitted respondent model as the target, the trees see only what the regression left unexplained, so large SHAP values mark features, including county weather variables, that account for variation the regression does not.
+
+### What SHAP does not show
+
+- SHAP values describe the fitted tree model. They are not causal effects, and they describe the data only as well as the model fits it; a low holdout R² means the SHAP values describe a weak model.
+- Correlated features share credit, and the division between them can change from fit to fit.
+- SHAP values are in the units of the target and are not comparable one-for-one with regression coefficients. There are no standard errors or tests.
+- A candidate missing factor or interaction found with SHAP is tested by adding it to the regression.
+
+### Validation
+
+`tests/validate_treeshap.js` checks the JavaScript TreeSHAP against exact Shapley values computed by enumerating every subset of features, and checks that SHAP values add up to the prediction and interaction values add up to SHAP values. `tests/validate_against_shap.py` hands the same trees to the Python `shap` package (version 0.52.0 at the time of writing) and compares SHAP values, interaction values and the expected value. In both, differences are at the level of floating-point rounding (below 10⁻¹⁴).
+
 ## Methods
 
 **Models.** Linear outcomes are fitted by weighted least squares. Yes/no outcomes are fitted by weighted logistic regression (iteratively reweighted least squares), with the answers counted as yes chosen in the tool. Survey weights are rescaled to a mean of 1. Rows with a missing value in any selected column are dropped.
 
-**Standard errors.** Robust (HC1) standard errors are the default. Clustering by county is also available, and is the appropriate choice when county weather variables are added to the respondent model, because every respondent in a county then shares the same weather values. Small-sample corrections follow Stata's conventions. The linear model and its robust and clustered standard errors were checked against statsmodels.
+**Standard errors.** Robust (HC1) standard errors are the default. HC3 standard errors (MacKinnon and White, 1985) and classical (model-based) standard errors are also available; for linear models these match statsmodels `WLS(...).fit(cov_type='HC3')` and the default `WLS(...).fit()`. Clustering by county is also available, and is the appropriate choice when county weather variables are added to the respondent model, because every respondent in a county then shares the same weather values. Small-sample corrections follow Stata's conventions. These are checked against statsmodels by the scripts in `tests/` (see Tests).
 
 **Residuals.** For the linear model the residual is observed minus fitted. For the logistic model it is the observed 0 or 1 minus the predicted probability. A positive county mean residual means respondents there scored higher on the outcome than their socioeconomic profile predicts.
 
@@ -36,6 +81,20 @@ The SPEER energy items run in different directions. `NRG_Solar`, `NRG_Wind` and 
 **Smoothing.** Most counties hold no respondents, so the default map layer is a Gaussian kernel smooth. Each county's value is the survey-weighted mean of respondent residuals, with each respondent further weighted by exp(-d²/2h²), where d is the distance between the centroid of the respondent's county and the centroid of the county being filled, and h is the smoothing distance set with the slider (25 to 400 km; respondents beyond 3h are ignored). The kernel-weighted respondent count is reported for each county, and counties where it falls below the minimum are hatched. A short distance keeps local detail but leaves gaps; a long distance fills the map but blends neighboring regions together, so a pattern that persists across several distances is more robust than one that appears at only one. The smoothed values are for display. Moran's I and the county weather model use the raw county means, since smoothing creates spatial correlation by construction. The downloaded county table includes both.
 
 **Spatial clustering.** Moran's I is computed on county mean residuals using row-standardized weights between counties that share a border, with a 999-permutation p-value. Counties with no qualifying neighbor are left out and counted. A significant positive I means counties with similar residuals are next to each other, a sign that something regional is missing from the respondent model.
+
+## Tests
+
+The statistical code is checked against reference implementations. From the repo root, with Node.js and Python installed:
+
+```
+node tests/validate_treeshap.js                 # TreeSHAP against brute-force Shapley values
+node tests/export_model.js
+python tests/validate_against_shap.py           # TreeSHAP against the shap package
+node tests/export_regression.js
+python tests/validate_regression.py             # regression against statsmodels
+```
+
+The regression check covers weighted linear models (coefficients, R², classical, HC1, HC3 and county-clustered standard errors, against statsmodels 0.15.0 WLS) and weighted logistic models (coefficients and classical, HC1 and clustered standard errors against a statsmodels binomial GLM, and HC3 against the standard formula).
 
 ## Building the county tables
 
@@ -58,6 +117,10 @@ python scripts/build_county_weather.py --perc-end 2024-07 --perc-base-years 3
 | `fema_` | OpenFEMA Disaster Declarations Summaries | declarations naming the county, all types and by incident type |
 | `pc_` | nClimDiv, Storm Events, US Drought Monitor | the 12 months before the survey compared with the preceding years, matched to the SPEER perception items (below) |
 
+### SPEER standard controls
+
+The built-in predictor set enters every term as a single slope, in this order: social orientation (`S_Moderate_d`, `S_Conservative_d`; reference liberal), party (`Independent_d`, `Republican_d`; reference Democrat), `BibLit_d`, `Attend`, `Evangelical_d`, `Bachelors_d`, age and mean-centered age squared (`AgeNum`, `McAgeSq`), `Woman_d`, race and ethnicity (`Black_d`, `Hispanic_d`, `OthRace_d`; reference White), `Married_d`, `Children_d`, `ZIncome`, `Rural_d`, `Urban_d` (reference suburban) and `South_d`, weighted by `Weight`. Two further sets add `POP_Trust`, `CCWS_Individualism_s` and `FR_s`, or `CC_Belief`. Display labels for these and other SPEER columns come from `window.SPEER_LABELS` in `js/presets.js`.
+
 ### Measured counterparts to the perception items
 
 SPEER Q15 (`WxPerc_*`) asks whether four kinds of events happened more or less often in the area around the respondent "in the last twelve months, as compared to the last few years", on a scale from 1 (definitely less frequently) to 5 (definitely more frequently). The `pc_` variables measure the same comparison for each county: the 12 months ending at `--perc-end` (default July 2024, the last full month before fieldwork began on August 16, 2024) against the mean of the `--perc-base-years` 12-month blocks before that (default 5, so August 2018 to July 2023). Every `pc_` variable is oriented so that a positive value means more of the event recently, the same direction as a high `WxPerc` answer.
@@ -79,19 +142,38 @@ Some properties of these sources that bear on interpretation:
 - FEMA declarations reflect state requests and federal decisions as well as the hazard itself. Statewide records and the 2020 Biological (COVID-19) declarations are excluded.
 - Connecticut's planning regions replaced its counties in 2022. The county map, the ZIP file and nClimDiv all use the older eight counties.
 
-## Testing
+## Sample file
 
 `sample/synthetic_survey.csv` is an invented survey of 4,000 respondents with a `county_fips` column. It exists only to try the tool, and its answers do not describe any real population.
 
 ## Files
 
 ```
-index.html, css/, js/          the tool (js/stats.js holds the regression and Moran's I code)
+index.html, css/, js/          the tool: js/stats.js (regression, standard errors, Moran's I),
+                               js/boost.js (boosted trees), js/treeshap.js (TreeSHAP),
+                               js/presets.js (predictor sets and labels), js/app.js (interface)
+tests/                         validation scripts (see Tests)
 data/counties-albers-10m.json  county outlines from us-atlas 3.0.1
 data/zip_county.csv            ZIP code to county lookup (rebuilt by scripts/build_zip_county.py)
 data/county_weather*.csv       built by scripts/build_county_weather.py
-vendor/                        d3 7.9.0, topojson-client 3.1.0, Papa Parse 5.7.0, with licenses
+vendor/                        d3 7.9.0, topojson-client 3.1.0, Papa Parse 5.7.0, SheetJS 0.18.5, with licenses
 ```
+
+## References
+
+Chen, T., and Guestrin, C. (2016). XGBoost: A scalable tree boosting system. *Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining*, 785–794.
+
+Friedman, J. H. (2001). Greedy function approximation: A gradient boosting machine. *Annals of Statistics*, 29(5), 1189–1232.
+
+Lundberg, S. M., Erion, G. G., and Lee, S.-I. (2018). Consistent individualized feature attribution for tree ensembles. arXiv:1802.03888.
+
+Lundberg, S. M., Erion, G., Chen, H., DeGrave, A., Prutkin, J. M., Nair, B., Katz, R., Himmelfarb, J., Bansal, N., and Lee, S.-I. (2020). From local explanations to global understanding with explainable AI for trees. *Nature Machine Intelligence*, 2, 56–67.
+
+Lundberg, S. M., and Lee, S.-I. (2017). A unified approach to interpreting model predictions. *Advances in Neural Information Processing Systems*, 30.
+
+MacKinnon, J. G., and White, H. (1985). Some heteroskedasticity-consistent covariance matrix estimators with improved finite sample properties. *Journal of Econometrics*, 29(3), 305–325.
+
+Moran, P. A. P. (1950). Notes on continuous stochastic phenomena. *Biometrika*, 37(1/2), 17–23.
 
 ## License and citation
 

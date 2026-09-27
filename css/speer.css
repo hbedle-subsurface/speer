@@ -171,7 +171,7 @@ tr.sig td:first-child { box-shadow: inset 3px 0 0 var(--storm); }
 .foot { padding: 0 32px 32px; font-size: 12px; color: var(--slate); }
 .foot p { margin: 4px 0; max-width: 100ch; }
 
-@media (max-width: 1100px) { .panels { grid-template-columns: 1fr; } }
+
 @media (max-width: 820px) {
   .layout { grid-template-columns: 1fr; padding: 16px; }
   .steps { position: static; max-height: none; }
@@ -193,3 +193,48 @@ tr.sig td:first-child { box-shadow: inset 3px 0 0 var(--storm); }
 .toast:not(.busy) .spinner { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
+button.link { border: 0; padding: 0 0 0 8px; background: none; color: var(--storm); font-size: 12px; text-decoration: underline; }
+.iv-row .label { color: var(--slate); font-size: 12px; }
+#tchart { width: 100%; height: auto; display: block; margin: 4px 0 10px; }
+#tchart text { font-size: 12px; fill: var(--ink); }
+#tchart .axis text { fill: var(--slate); font-size: 11px; }
+#tchart .axis path, #tchart .axis line { stroke: var(--rule); }
+#export-coef { margin-top: 10px; }
+
+/* ---------- analysis tabs ---------- */
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: -21px; position: relative; z-index: 1; padding-left: 12px; }
+.tabs button { border: 1px solid var(--rule); border-bottom: 0; border-radius: var(--radius-m) var(--radius-m) 0 0; background: var(--paper); color: var(--slate); padding: 7px 14px; }
+.tabs button[aria-selected="true"] { background: var(--card); color: var(--ink); font-weight: 600; }
+.tabpanel { border-top-left-radius: 0; }
+.two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; margin-bottom: 8px; }
+.row-fields { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: flex-end; }
+.row-fields .field { min-width: 200px; }
+button.primary.inline-btn { display: inline-block; width: auto; margin-top: 10px; padding: 7px 16px; }
+.iv-list.short { max-height: 180px; }
+.pair-inline { display: flex; gap: 6px; }
+.pair-inline select, .pair-inline input { width: auto; }
+.pair-inline input { width: 70px; }
+#dv-hist, #int-plot, #grp-plot { width: 100%; height: auto; display: block; }
+#dv-hist { max-width: 420px; }
+#dv-hist text, #int-plot text, #grp-plot text, #corr text { font-size: 11px; fill: var(--ink); }
+.axis text { fill: var(--slate); }
+.axis path, .axis line { stroke: var(--rule); }
+details.diag, details.computed { margin-top: 12px; font-size: 13px; }
+details summary { cursor: pointer; color: var(--storm); }
+details.computed button { margin-top: 8px; }
+@media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+#tchart { max-width: 720px; }
+#int-plot, #grp-plot { max-width: 760px; }
+
+/* ---------- SHAP tab ---------- */
+.shap-notes { background: var(--storm-soft); border-radius: var(--radius-s); padding: 10px 14px; margin: 0 0 14px; font-size: 13px; }
+.shap-notes p, .shap-notes ul { margin: 8px 0 0; max-width: 90ch; }
+.shap-notes li { margin-bottom: 4px; }
+h3.sub { font-size: 14px; margin: 20px 0 6px; }
+.settings .field { min-width: 120px; }
+.settings input { width: 110px; }
+input[type=number] { font: inherit; font-size: 14px; padding: 5px 6px; border: 1px solid var(--rule); border-radius: var(--radius-s); display: block; margin-top: 4px; }
+#shap-bar, #shap-swarm, #shap-dep { width: 100%; height: auto; display: block; max-width: 760px; }
+#shap-bar text, #shap-swarm text, #shap-dep text, #shap-int text { font-size: 11px; fill: var(--ink); }
+.pairs td button { font-size: 12px; padding: 2px 8px; margin-right: 4px; }

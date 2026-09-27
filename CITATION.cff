@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use SPEER, please cite it as below."
+title: "SPEER: survey regression residuals by county"
+authors:
+  - family-names: Bedle
+    given-names: Heather
+    affiliation: University of Oklahoma
+    orcid: "https://orcid.org/0000-0003-3010-0195"
+license: CC-BY-SA-4.0
+url: "https://hbedle-subsurface.github.io/SPEER/"
+repository-code: "https://github.com/hbedle-subsurface/SPEER"
+date-released: "2026-09-27"

@@ -24,13 +24,30 @@
     <section class="step" id="step-load">
       <h2><span class="step-num">1</span> Load the survey</h2>
       <label class="drop" id="drop-survey" tabindex="0">
-        <input type="file" id="file-survey" accept=".csv,text/csv" hidden>
-        <span class="drop-main">Drop a CSV here or choose a file</span>
+        <input type="file" id="file-survey" accept=".csv,text/csv,.xlsx,.xls" hidden>
+        <span class="drop-main">Drop a CSV or Excel file here, or choose one</span>
         <span class="drop-sub" id="survey-status">No file loaded</span>
       </label>
       <label class="field">Codes to treat as missing
         <input type="text" id="missing-codes" placeholder="e.g. 98, 99, Refused">
       </label>
+      <details class="computed">
+        <summary>Add a computed column</summary>
+        <label class="field">Calculation
+          <select id="cc-op">
+            <option value="diff">A minus B</option>
+            <option value="sum">A plus B</option>
+            <option value="prod">A times B</option>
+            <option value="center">A mean-centered</option>
+            <option value="z">A standardized</option>
+          </select>
+        </label>
+        <label class="field">A <select id="cc-a"></select></label>
+        <label class="field" id="cc-b-wrap">B <select id="cc-b"></select></label>
+        <label class="field">New column name <input type="text" id="cc-name" placeholder="e.g. NRG_CCdiff"></label>
+        <button type="button" id="cc-add">Add column</button>
+        <p class="status" id="cc-status"></p>
+      </details>
     </section>
 
     <section class="step" id="step-place" data-locked>
@@ -74,8 +91,12 @@
         <legend>Answers counted as yes</legend>
         <div class="checks" id="dv-ones-list"></div>
       </fieldset>
+      <label class="field">Predictor set
+        <select id="preset"></select>
+      </label>
+      <p class="hint" id="preset-note"></p>
       <div class="field">
-        <span class="field-label">Predictors</span>
+        <span class="field-label">Predictors <button type="button" class="link" id="save-preset">Save this set</button> <button type="button" class="link" id="clear-ivs">Clear</button></span>
         <input type="search" id="iv-filter" placeholder="Filter columns" aria-label="Filter predictor columns">
         <div class="iv-list" id="iv-list"></div>
         <p class="hint">Number: entered as one slope. Category: one coefficient per answer, compared with the most common answer.</p>
@@ -85,8 +106,10 @@
       </label>
       <label class="field">Standard errors
         <select id="se-kind">
-          <option value="robust">Robust (HC1)</option>
+          <option value="hc1">Robust (HC1)</option>
+          <option value="hc3">Robust (HC3)</option>
           <option value="cluster">Clustered by county</option>
+          <option value="classical">Classical (model-based)</option>
         </select>
       </label>
       <label class="check-line"><input type="checkbox" id="add-weather" disabled> Add selected weather variables as predictors</label>
@@ -128,23 +151,167 @@
       </figcaption>
     </figure>
 
-    <div class="panels">
-      <section class="panel" id="panel-model">
-        <h3>Respondent model</h3>
-        <div id="model-summary" class="summary"></div>
-        <div id="coef-table"></div>
-      </section>
-
-      <section class="panel" id="panel-county">
-        <h3>County residuals and weather</h3>
-        <label class="field inline">Plot against
-          <select id="scatter-x"></select>
-        </label>
-        <svg id="scatter" viewBox="0 0 520 340" role="img" aria-label="County mean residual against a weather variable"></svg>
-        <div id="county-summary" class="summary"></div>
-        <div id="county-table"></div>
-      </section>
+    <div class="tabs" role="tablist" aria-label="Analyses">
+      <button type="button" role="tab" data-tab="model" aria-selected="true">Model</button>
+      <button type="button" role="tab" data-tab="interaction" aria-selected="false">Interaction</button>
+      <button type="button" role="tab" data-tab="groups" aria-selected="false">Group comparison</button>
+      <button type="button" role="tab" data-tab="corr" aria-selected="false">Correlations</button>
+      <button type="button" role="tab" data-tab="shap" aria-selected="false">SHAP</button>
+      <button type="button" role="tab" data-tab="county" aria-selected="false">County and weather</button>
     </div>
+
+    <section class="panel tabpanel" id="tab-model" role="tabpanel">
+      <div class="two-col">
+        <div>
+          <h3>Outcome</h3>
+          <div id="dv-desc" class="summary">Choose an outcome in step 4.</div>
+          <svg id="dv-hist" role="img" aria-label="Distribution of the outcome"></svg>
+        </div>
+        <div>
+          <h3>Respondent model</h3>
+          <div id="model-summary" class="summary">Fit a model in step 4.</div>
+        </div>
+      </div>
+      <label class="field inline">Chart
+        <select id="chart-kind">
+          <option value="t">t values</option>
+          <option value="coef">Coefficients with 95% intervals</option>
+        </select>
+      </label>
+      <svg id="tchart" role="img" aria-label="Respondent model results"></svg>
+      <div id="coef-table"></div>
+      <button type="button" id="export-coef" disabled>Download coefficient table</button>
+      <details class="diag">
+        <summary>Collinearity: variance inflation factors and condition number</summary>
+        <div id="vif" class="summary">Fit a model first.</div>
+      </details>
+    </section>
+
+    <section class="panel tabpanel" id="tab-interaction" role="tabpanel" hidden>
+      <p class="summary">Adds a moderator, a second variable and their product to the current respondent model (same outcome, predictors, weight and standard errors), then plots predicted values of the outcome with the other predictors held at their weighted means.</p>
+      <div class="row-fields">
+        <label class="field">Moderator (lines)
+          <select id="int-a"></select>
+        </label>
+        <label class="field">Varies along the x axis
+          <select id="int-b"></select>
+        </label>
+        <label class="check-line"><input type="checkbox" id="int-center" checked> Mean-center the x-axis variable</label>
+        <button type="button" class="primary inline-btn" id="int-fit">Fit interaction</button>
+      </div>
+      <div id="int-summary" class="summary"></div>
+      <svg id="int-plot" role="img" aria-label="Predicted outcome by moderator"></svg>
+      <div id="int-table"></div>
+    </section>
+
+    <section class="panel tabpanel" id="tab-groups" role="tabpanel" hidden>
+      <p class="summary">Weighted percent of respondents giving a favorable answer, by group, for one or more items.</p>
+      <div class="row-fields">
+        <label class="field">Group by
+          <select id="grp-by"></select>
+        </label>
+        <label class="field">Group labels (optional)
+          <input type="text" id="grp-labels" placeholder="1=Democrat, 2=Independent, 3=Republican">
+        </label>
+        <label class="field">Count as favorable
+          <span class="pair-inline"><select id="grp-op"><option value=">=">at least</option><option value="<=">at most</option></select>
+          <input type="text" id="grp-cut" value="4" aria-label="Cut-off value"></span>
+        </label>
+      </div>
+      <div class="field">
+        <span class="field-label">Items</span>
+        <input type="search" id="grp-filter" placeholder="Filter columns" aria-label="Filter item columns">
+        <div class="iv-list short" id="grp-items"></div>
+      </div>
+      <button type="button" class="primary inline-btn" id="grp-draw">Draw comparison</button>
+      <div id="grp-summary" class="summary"></div>
+      <svg id="grp-plot" role="img" aria-label="Percent favorable by group"></svg>
+      <button type="button" id="export-grp" disabled>Download percentages</button>
+    </section>
+
+    <section class="panel tabpanel" id="tab-corr" role="tabpanel" hidden>
+      <p class="summary">Pearson correlations among the outcome and the current predictors, using complete rows.</p>
+      <button type="button" class="primary inline-btn" id="corr-draw">Draw correlations</button>
+      <div id="corr-summary" class="summary"></div>
+      <div class="table-scroll"><svg id="corr" role="img" aria-label="Correlation heatmap"></svg></div>
+    </section>
+
+    <section class="panel tabpanel" id="tab-shap" role="tabpanel" hidden>
+      <details class="shap-notes" open>
+        <summary>What SHAP shows, and what it does not</summary>
+        <p>A boosted tree model is fitted to the target, and SHAP values divide each respondent's prediction among the features that went into the model. The mean absolute SHAP value of a feature is how much, on average, it moves the model's predictions. SHAP interaction values split that further into pairs of features whose contributions depend on each other.</p>
+        <ul>
+          <li>SHAP describes how this fitted model uses each feature. It does not measure causal effects, and it describes the data only as well as the model fits it; the holdout R² reports that fit.</li>
+          <li>Correlated features share credit. Party and ideology, for example, can split importance between them, and the split can shift from one fit to the next. Repeated runs with different random seeds show how stable each ranking is.</li>
+          <li>A feature with large SHAP importance that is not in the respondent model is a candidate missing factor. Fitting the target on the model's residuals asks the same question directly: which features explain what the regression leaves over.</li>
+          <li>A large interaction value marks a pair worth testing. An interaction term in the regression (the Interaction tab) gives a coefficient, a standard error and a test; SHAP gives none of these.</li>
+          <li>SHAP values are in the units of the target and are not regression coefficients. Tree settings, the holdout split and the seed all change the results somewhat.</li>
+        </ul>
+      </details>
+
+      <div class="row-fields">
+        <label class="field">Target
+          <select id="shap-target">
+            <option value="outcome">Outcome (step 4)</option>
+            <option value="resid">Residuals of the fitted respondent model</option>
+          </select>
+        </label>
+        <label class="check-line"><input type="checkbox" id="shap-use-ivs" checked> Include the respondent-model predictors</label>
+        <label class="check-line"><input type="checkbox" id="shap-use-wx"> Include weather variables ticked in step 3</label>
+        <label class="check-line"><input type="checkbox" id="shap-weights" checked> Use survey weights</label>
+      </div>
+      <div class="field">
+        <span class="field-label">Additional candidate features</span>
+        <input type="search" id="shap-filter" placeholder="Filter columns" aria-label="Filter candidate columns">
+        <div class="iv-list short" id="shap-cands"></div>
+      </div>
+      <details class="diag" id="shap-settings">
+        <summary>Tree settings</summary>
+        <div class="row-fields settings">
+          <label class="field">Trees <input type="number" id="shap-trees" value="200" min="10" max="2000" step="10"></label>
+          <label class="field">Depth <input type="number" id="shap-depth" value="3" min="1" max="8"></label>
+          <label class="field">Learning rate <input type="number" id="shap-lr" value="0.05" min="0.005" max="1" step="0.005"></label>
+          <label class="field">Row subsample <input type="number" id="shap-sub" value="0.8" min="0.1" max="1" step="0.05"></label>
+          <label class="field">Min. child weight <input type="number" id="shap-mcw" value="10" min="0" step="1"></label>
+          <label class="field">L2 penalty (λ) <input type="number" id="shap-lambda" value="1" min="0" step="0.5"></label>
+          <label class="field">Holdout share <input type="number" id="shap-hold" value="0.2" min="0" max="0.5" step="0.05"></label>
+          <label class="field">Runs <input type="number" id="shap-runs" value="3" min="1" max="10"></label>
+          <label class="field">Seed <input type="number" id="shap-seed" value="1" step="1"></label>
+        </div>
+      </details>
+      <button type="button" class="primary inline-btn" id="shap-run">Fit trees and compute SHAP</button>
+      <div id="shap-summary" class="summary"></div>
+
+      <h3 class="sub">Mean absolute SHAP value</h3>
+      <svg id="shap-bar" role="img" aria-label="Mean absolute SHAP value by feature"></svg>
+      <h3 class="sub">Each respondent's SHAP values</h3>
+      <svg id="shap-swarm" role="img" aria-label="SHAP values for each respondent"></svg>
+      <h3 class="sub">Dependence</h3>
+      <div class="row-fields">
+        <label class="field">Feature <select id="shap-dep-x"></select></label>
+        <label class="field">Color by <select id="shap-dep-c"></select></label>
+      </div>
+      <svg id="shap-dep" role="img" aria-label="SHAP dependence plot"></svg>
+      <h3 class="sub">Interactions</h3>
+      <div class="row-fields">
+        <label class="field">Respondents sampled <input type="number" id="shap-int-n" value="300" min="50" max="3000" step="50"></label>
+        <button type="button" class="primary inline-btn" id="shap-int-run" disabled>Compute interaction values</button>
+      </div>
+      <div id="shap-int-summary" class="summary"></div>
+      <div class="table-scroll"><svg id="shap-int" role="img" aria-label="Mean absolute SHAP interaction values"></svg></div>
+      <div id="shap-pairs"></div>
+      <button type="button" id="shap-export" disabled>Download SHAP summaries</button>
+    </section>
+
+    <section class="panel tabpanel" id="tab-county" role="tabpanel" hidden>
+      <h3>County residuals and weather</h3>
+      <label class="field inline">Plot against
+        <select id="scatter-x"></select>
+      </label>
+      <svg id="scatter" viewBox="0 0 520 340" role="img" aria-label="County mean residual against a weather variable"></svg>
+      <div id="county-summary" class="summary"></div>
+      <div id="county-table"></div>
+    </section>
 
   </section>
 </main>
@@ -163,7 +330,11 @@
 <script src="vendor/d3.min.js"></script>
 <script src="vendor/topojson-client.min.js"></script>
 <script src="vendor/papaparse.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="js/presets.js"></script>
 <script src="js/stats.js"></script>
+<script src="js/boost.js"></script>
+<script src="js/treeshap.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

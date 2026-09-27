@@ -86,6 +86,64 @@ const Stats = (() => {
     return { V: V.map(r => r.map(v => v * c)), G };
   }
 
+  // HC3: scores divided by (1 - leverage). glmW (logit) supplies p(1-p) for the leverage.
+  function hc3(X, w, e, bread, glmW) {
+    const n = X.length, k = X[0].length, meat = zeros(k, k);
+    for (let i = 0; i < n; i++) {
+      const xi = X[i], Bx = matVec(bread, xi);
+      const h = w[i] * (glmW ? glmW[i] : 1) * xi.reduce((s, v, a) => s + v * Bx[a], 0);
+      const f = w[i] * e[i] / Math.max(1 - h, 1e-8);
+      for (let a = 0; a < k; a++) { const fa = f * xi[a]; for (let b = 0; b < k; b++) meat[a][b] += fa * f * xi[b]; }
+    }
+    const BM = bread.map(row => meat[0].map((_, j) => row.reduce((s, v, t) => s + v * meat[t][j], 0)));
+    return BM.map(row => bread[0].map((_, j) => row.reduce((s, v, t) => s + v * bread[t][j], 0)));
+  }
+
+  // symmetric eigenvalues by cyclic Jacobi rotation
+  function eigSym(A) {
+    const n = A.length, M = A.map(r => r.slice());
+    for (let sweep = 0; sweep < 100; sweep++) {
+      let off = 0;
+      for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) off += M[p][q] ** 2;
+      if (off < 1e-22) break;
+      for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) {
+        if (Math.abs(M[p][q]) < 1e-300) continue;
+        const th = (M[q][q] - M[p][p]) / (2 * M[p][q]);
+        const t = Math.sign(th || 1) / (Math.abs(th) + Math.sqrt(th * th + 1));
+        const c = 1 / Math.sqrt(t * t + 1), sn = t * c;
+        for (let r = 0; r < n; r++) { const a = M[r][p], b = M[r][q]; M[r][p] = c * a - sn * b; M[r][q] = sn * a + c * b; }
+        for (let r = 0; r < n; r++) { const a = M[p][r], b = M[q][r]; M[p][r] = c * a - sn * b; M[q][r] = sn * a + c * b; }
+      }
+    }
+    return M.map((r, i) => r[i]);
+  }
+
+  // variance inflation factors (unweighted, as statsmodels) and condition number of X with its constant
+  function collinearity(X) {
+    const k = X[0].length, ones = new Array(X.length).fill(1), vif = [];
+    for (let j = 1; j < k; j++) {
+      const others = X.map(r => r.filter((_, c) => c !== j));
+      const yj = X.map(r => r[j]);
+      const B = invert(xtwx(others, ones));
+      if (!B) { vif.push(Infinity); continue; }
+      const b = matVec(B, xtwy(others, ones, yj));
+      const m = yj.reduce((s, v) => s + v, 0) / yj.length;
+      let sse = 0, sst = 0;
+      others.forEach((r, i) => { const f = r.reduce((s, v, c) => s + v * b[c], 0); sse += (yj[i] - f) ** 2; sst += (yj[i] - m) ** 2; });
+      vif.push(sst > 0 ? 1 / Math.max(sse / sst, 1e-12) : Infinity);
+    }
+    const ev = eigSym(xtwx(X, ones)).map(v => Math.max(v, 0));
+    const cond = Math.sqrt(Math.max(...ev) / Math.max(Math.min(...ev), 1e-300));
+    return { vif, cond };
+  }
+
+  // linear prediction x'b with its standard error sqrt(x'Vx)
+  function predict(x, beta, V) {
+    const eta = x.reduce((s, v, i) => s + v * beta[i], 0);
+    const Vx = matVec(V, x);
+    return { eta, se: Math.sqrt(Math.max(0, x.reduce((s, v, i) => s + v * Vx[i], 0))) };
+  }
+
   // ---------- distributions ----------
   function logGamma(x) {
     const g = [76.18009172947146, -86.50532032941677, 24.01409824083091,
@@ -138,6 +196,18 @@ const Stats = (() => {
   }
   function pZ(z) { return erfc(Math.abs(z) / Math.SQRT2); }
 
+  // two-sided 95% critical value: Student t (df) or normal (df null)
+  function crit95(df) {
+    if (!df) return 1.959964;
+    let lo = 0, hi = 50;
+    for (let i = 0; i < 80; i++) { const m = (lo + hi) / 2; if (pT(m, df) > 0.05) lo = m; else hi = m; }
+    return (lo + hi) / 2;
+  }
+  function ciFrom(beta, se, df) {
+    const c = crit95(df);
+    return beta.map((b, i) => [b - c * se[i], b + c * se[i]]);
+  }
+
   // ---------- models ----------
   // weights are normalized to mean 1 so they act as relative survey weights
   function normWeights(w, n) {
@@ -146,7 +216,9 @@ const Stats = (() => {
     return w.map(v => v / m);
   }
 
-  function ols(X, y, wRaw, clusters) {
+  // opts: { se: 'hc1' | 'hc3' | 'cluster' | 'classical', clusters: [...] }
+  function ols(X, y, wRaw, opts = {}) {
+    const se_ = opts.se || 'hc1', clusters = se_ === 'cluster' ? opts.clusters : null, classical = se_ === 'classical';
     const n = X.length, k = X[0].length;
     if (n <= k) return { error: `Only ${n} complete rows for ${k} coefficients.` };
     const w = normWeights(wRaw, n);
@@ -159,8 +231,14 @@ const Stats = (() => {
     const ybar = y.reduce((s, v, i) => s + w[i] * v, 0) / sw;
     const sst = y.reduce((s, v, i) => s + w[i] * (v - ybar) ** 2, 0);
     const sse = resid.reduce((s, v, i) => s + w[i] * v * v, 0);
-    const { V, G } = sandwich(X, w, resid, bread, clusters);
-    const df = clusters ? G - 1 : n - k;
+    let V, G = null;
+    if (classical) {
+      const s2 = resid.reduce((s, e, i) => s + w[i] * e * e, 0) / (n - k);
+      V = bread.map(r => r.map(v => v * s2));
+    } else if (se_ === 'hc3') {
+      V = hc3(X, w, resid, bread, null);
+    } else ({ V, G } = sandwich(X, w, resid, bread, clusters));
+    const df = (clusters && !classical) ? G - 1 : n - k;
     const se = V.map((r, i) => Math.sqrt(Math.max(r[i], 0)));
     const stat = beta.map((b, i) => b / se[i]);
     return {
@@ -168,11 +246,13 @@ const Stats = (() => {
       p: stat.map(t => pT(t, df)),
       fitted, resid, r2: 1 - sse / sst,
       adjR2: 1 - (sse / (n - k)) / (sst / (n - 1)),
-      rmse: Math.sqrt(sse / sw), clusters: clusters ? G : null,
+      rmse: Math.sqrt(sse / sw), clusters: clusters ? G : null, seKind: se_, V, w,
+      ci: ciFrom(beta, se, df),
     };
   }
 
-  function logit(X, y, wRaw, clusters) {
+  function logit(X, y, wRaw, opts = {}) {
+    const se_ = opts.se || 'hc1', clusters = se_ === 'cluster' ? opts.clusters : null, classical = se_ === 'classical';
     const n = X.length, k = X[0].length;
     if (n <= k) return { error: `Only ${n} complete rows for ${k} coefficients.` };
     const w = normWeights(wRaw, n);
@@ -198,7 +278,10 @@ const Stats = (() => {
     p = eta.map(e => 1 / (1 + Math.exp(-e)));
     bread = invert(xtwx(X, p.map((pi, i) => w[i] * Math.max(pi * (1 - pi), 1e-12))));
     const resid = y.map((v, i) => v - p[i]);
-    const { V, G } = sandwich(X, w, resid, bread, clusters, true);
+    let V, G = null;
+    if (classical) V = bread;
+    else if (se_ === 'hc3') V = hc3(X, w, resid, bread, p.map(pi => pi * (1 - pi)));
+    else ({ V, G } = sandwich(X, w, resid, bread, clusters, true));
     const se = V.map((r, i) => Math.sqrt(Math.max(r[i], 0)));
     const stat = beta.map((b, i) => b / se[i]);
     const sw = w.reduce((s, v) => s + v, 0);
@@ -207,7 +290,8 @@ const Stats = (() => {
     return {
       kind: 'logit', n, k, beta, se, stat, df: null,
       p: stat.map(pZ), fitted: p, resid,
-      pseudoR2: 1 - ll / ll0, converged, clusters: clusters ? G : null,
+      pseudoR2: 1 - ll / ll0, converged, clusters: clusters ? G : null, seKind: se_, V, w,
+      ci: ciFrom(beta, se, null),
     };
   }
 
@@ -242,7 +326,7 @@ const Stats = (() => {
     return { I: obs, expected: -1 / (n - 1), p: (ge + 1) / (nPerm + 1), n, excluded, nPerm };
   }
 
-  return { ols, logit, moransI, pT, pZ, invert };
+  return { ols, logit, moransI, pT, pZ, invert, collinearity, predict, crit95 };
 })();
 
 if (typeof module !== 'undefined') module.exports = Stats;
