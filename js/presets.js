@@ -68,3 +68,23 @@ window.SPEER_LABELS = {
   xregion: 'Region', Attend: 'Church Attendance', CC_Belief: 'CC Belief', CC_Risk: 'CC Risk',
   CCWS_Individualism_s: 'Individualism',
 };
+
+// Answer scales for SPEER items, from the 2024 questionnaire, used to describe
+// what higher and lower values mean on the map. low/high describe the answers
+// at the bottom and top of the coded scale.
+window.SPEER_SCALES = (() => {
+  const s = {};
+  const freq = { low: 'definitely less frequently', high: 'definitely more frequently' };
+  ['RainFlood', 'HotHeat', 'ColdWinter', 'Droughts'].forEach(k => { s['WxPerc_' + k] = freq; s['WxFut_' + k] = freq; });
+  ['Solar', 'Wind', 'Nuclear'].forEach(k => {
+    s['NRG_' + k] = { low: 'very favorable', high: 'very unfavorable' };
+    s['NRG_' + k + '_l'] = { low: 'very unfavorable', high: 'very favorable' };
+  });
+  s.NRG_HC = { low: 'strongly agree hydrocarbons should stay in the mix', high: 'strongly disagree' };
+  s.NRG_HC_l = { low: 'strongly disagree hydrocarbons should stay in the mix', high: 'strongly agree' };
+  s.NRG_CC = { low: 'strongly oppose carbon capture research', high: 'strongly favor' };
+  s.WxMove = { low: 'very unlikely to move', high: 'very likely' };
+  s.WxStay = { low: 'stable weather not important', high: 'very important' };
+  s.CC_Belief = { low: 'very certain warming is happening', high: 'very certain it is not' };
+  return s;
+})();

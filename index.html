@@ -142,13 +142,29 @@
         <div class="map-empty" id="map-empty">Fit a model to map residuals by county.</div>
       </div>
       <figcaption>
-        <svg id="legend" width="440" height="44" aria-hidden="true"></svg>
+        <svg id="legend" width="440" height="60" aria-hidden="true"></svg>
         <div class="moran">
           <button type="button" id="run-moran" disabled>Test for clustering (Moran's I)</button>
           <span id="moran-out"></span>
         </div>
         <button type="button" id="export-county" disabled>Download county table</button>
       </figcaption>
+      <div class="map-read" id="map-read" hidden></div>
+      <details class="regions" id="regions" hidden>
+        <summary>Average residual by state or region, with 95% intervals</summary>
+        <div class="row-fields">
+          <label class="field">Group by
+            <select id="region-kind">
+              <option value="state">State</option>
+              <option value="division">Census division</option>
+              <option value="region">Census region</option>
+            </select>
+          </label>
+          <label class="field">Minimum respondents <input type="number" id="region-min" value="20" min="2" step="1"></label>
+        </div>
+        <p class="hint" id="region-note"></p>
+        <svg id="region-plot" role="img" aria-label="Average residual by state or region"></svg>
+      </details>
     </figure>
 
     <div class="tabs" role="tablist" aria-label="Analyses">

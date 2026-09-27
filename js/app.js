@@ -672,6 +672,7 @@
       const v = L.slice(3), dom = wxDomain(v);
       fill = id => { const x = S.wx?.get(id)?.[v]; return x != null && isFinite(x) ? SEQ(Math.max(0, Math.min(1, (x - dom[0]) / (dom[1] - dom[0] || 1)))) : null; };
     }
+    queueMicrotask(renderMapReading);
     countyPaths.attr('fill', d => fill(d.id) || (L === 'smooth' ? (S.fit ? 'url(#nodata)' : '#E6E9EA') : S.county.has(d.id) ? '#D5DADC' : '#E6E9EA'));
     drawLegend();
   }
@@ -700,6 +701,10 @@
     const lab = v => Math.abs(v) >= 100 ? d3.format(',.0f')(v) : d3.format('.2~f')(v);
     [[lo, 'start', x0], [hi, 'end', x0 + W]].forEach(([v, a, x]) =>
       g.append('text').attr('x', x).attr('y', 40).attr('text-anchor', a).attr('font-size', 11).attr('fill', '#1B2429').text(((L === 'resid' || L === 'smooth') && v > 0 ? '+' : '') + lab(v)));
+    if ((L === 'resid' || L === 'smooth') && S.fit) {
+      g.append('text').attr('x', x0).attr('y', 54).attr('font-size', 11).attr('fill', '#2C5D8A').text('lower than predicted');
+      g.append('text').attr('x', x0 + W).attr('y', 54).attr('text-anchor', 'end').attr('font-size', 11).attr('fill', '#A33A2E').text('higher than predicted');
+    }
     if (L === 'resid' || L === 'smooth') g.append('text').attr('x', x0 + W / 2).attr('y', 40).attr('text-anchor', 'middle').attr('font-size', 11).attr('fill', '#1B2429').text('0');
     if (L === 'smooth') {
       const lp = g.select('defs').append('pattern').attr('id', 'nodata-lg').attr('patternUnits', 'userSpaceOnUse').attr('width', 4).attr('height', 4).attr('patternTransform', 'rotate(45)');
@@ -749,7 +754,10 @@
       const m = Stats.moransI(vals, S.neighbors, 999);
       $('moran-out').innerHTML = m.error ? `<span class="warn">${esc(m.error)}</span>` :
         `I = <b>${fmt(m.I)}</b> (expected ${fmt(m.expected)} with no clustering), permutation p = <b>${fmtP(m.p)}</b>, ${m.n} counties sharing a border with another county at n ≥ ${minN()}` +
-        (m.excluded ? `; ${m.excluded} isolated counties left out` : '') + '.';
+        (m.excluded ? `; ${m.excluded} isolated counties left out` : '') + '. ' +
+        (m.p < 0.05 ? (m.I > 0 ? 'Neighboring counties have more similar residuals than chance would give, so part of what the model leaves unexplained is geographic.' : 'Neighboring counties are less alike than chance would give.')
+          : 'Neighboring counties are not more alike than chance would give at this minimum; the pattern on the map may be mostly smoothing and noise.');
+      S.moran = m; renderMapReading();
     }, 20);
   });
 
@@ -829,6 +837,107 @@
       names.map((nm, j) => `<tr class="${res.p[j] < 0.05 && j > 0 ? 'sig' : ''}"><td>${esc(nm)}</td><td class="num">${fmt(res.beta[j], 4)}</td><td class="num">${fmt(res.se[j], 4)}</td><td class="num">${fmt(res.stat[j], 2)}</td><td class="num">${fmtP(res.p[j])}</td></tr>`).join('') +
       '</tbody></table></div>';
   }
+
+  // ---------------- reading the map ----------------
+  const DIVISION = {
+    'New England': ['CT', 'ME', 'MA', 'NH', 'RI', 'VT'], 'Middle Atlantic': ['NJ', 'NY', 'PA'],
+    'East North Central': ['IL', 'IN', 'MI', 'OH', 'WI'], 'West North Central': ['IA', 'KS', 'MN', 'MO', 'NE', 'ND', 'SD'],
+    'South Atlantic': ['DE', 'FL', 'GA', 'MD', 'NC', 'SC', 'VA', 'DC', 'WV'], 'East South Central': ['AL', 'KY', 'MS', 'TN'],
+    'West South Central': ['AR', 'LA', 'OK', 'TX'], 'Mountain': ['AZ', 'CO', 'ID', 'MT', 'NV', 'NM', 'UT', 'WY'],
+    'Pacific': ['AK', 'CA', 'HI', 'OR', 'WA'],
+  };
+  const REGION = { Northeast: ['New England', 'Middle Atlantic'], Midwest: ['East North Central', 'West North Central'],
+    South: ['South Atlantic', 'East South Central', 'West South Central'], West: ['Mountain', 'Pacific'] };
+  const divisionOf = ab => Object.keys(DIVISION).find(d => DIVISION[d].includes(ab));
+  const regionOf = ab => { const d = divisionOf(ab); return Object.keys(REGION).find(r => REGION[r].includes(d)); };
+
+  function scaleWords() {
+    const f = S.fit, sc = (window.SPEER_SCALES || {})[f.dv];
+    const vals = f.idx.map(i => num(S.rows[i][f.dv])).filter(isFinite);
+    const lo = d3.min(vals), hi = d3.max(vals);
+    if (f.kind === 'logit') return { up: 'a larger share answering yes than predicted', down: 'a smaller share than predicted', span: 1, lo: 0, hi: 1, scaleTxt: 'a 0–1 probability scale' };
+    return {
+      up: sc ? `higher answers than predicted (toward “${sc.high}”)` : `higher values of ${labelOf(f.dv)} than predicted`,
+      down: sc ? `lower answers than predicted (toward “${sc.low}”)` : `lower values than predicted`,
+      span: hi - lo, lo, hi, scaleTxt: `the ${d3.format('~g')(lo)}–${d3.format('~g')(hi)} answer scale`,
+    };
+  }
+
+  function renderMapReading() {
+    const box = $('map-read'), L = layer();
+    if (!S.fit || !(L === 'smooth' || L === 'resid')) { box.hidden = true; return; }
+    const f = S.fit, W = scaleWords(), range = +$('range').value, mn = minN(), bw = +$('bw').value;
+    const pct = W.span ? Math.round(100 * range / W.span) : null;
+    const nResp = [...S.county.values()].reduce((s, c) => s + c.n, 0);
+    let colored, support = '';
+    if (L === 'smooth') {
+      const sm = smoothed(), ne = [...sm.values()].filter(c => c.neff >= mn).map(c => c.neff).sort((a, b) => a - b);
+      colored = ne.length;
+      support = ` Each colored county draws on a median of ${fmt(d3.quantileSorted(ne, 0.5) || 0, 0)} distance-weighted respondents.`;
+    } else colored = [...S.county.values()].filter(c => c.n >= mn).length;
+    const total = S.countyName.size;
+    const ps = [];
+    ps.push(`<p><span class="swatch" style="background:#A33A2E"></span><b>Red</b>: respondents there gave ${esc(W.up)}, given their characteristics in the model. <span class="swatch" style="background:#2C5D8A"></span><b>Blue</b>: ${esc(W.down)}. Near-white: close to what the model predicts.</p>`);
+    ps.push(`<p>The residual is each respondent's answer minus the answer the model of <b>${esc(labelOf(f.dv))}</b> predicts from their ${f.ivs.length} predictors. The color range of ±${fmt(range, 2)} is ${pct != null ? `${pct}% of ` : ''}${W.scaleTxt}; residuals beyond it take the darkest color.</p>`);
+    if (L === 'smooth') ps.push(`<p>Each county's color is a weighted average of the residuals of nearby respondents: a respondent about ${Math.round(bw * 1.1774)} km away counts half as much as one in the county, and those beyond ${bw * 3} km do not count (Gaussian weighting, ${bw} km smoothing distance). Neighboring counties share most of the same respondents, so the map shows regional patterns and not county-by-county differences. ${nResp.toLocaleString()} respondents, ${colored.toLocaleString()} of ${total.toLocaleString()} counties colored.${support} Hatched counties have fewer than ${mn} weighted respondent${mn > 1 ? 's' : ''} nearby.</p>`);
+    else ps.push(`<p>Each colored county is the weighted mean residual of the respondents who live there, shown where at least ${mn} do (${colored.toLocaleString()} of ${total.toLocaleString()} counties). Most counties hold very few respondents, so single counties are noisy.</p>`);
+    const notes = [];
+    if (mn < 5) notes.push(`With a minimum of ${mn}, colors in thinly sampled areas can rest on a handful of respondents; the Respondents layer shows where people are.`);
+    if (L === 'smooth' && bw >= 200) notes.push(`At ${bw} km, whole regions blend together by construction. A pattern that also appears at 100–150 km is less a product of the smoothing.`);
+    if (L === 'smooth' && bw <= 50) notes.push(`At ${bw} km, most counties have few respondents nearby, so the map is patchy and noisy.`);
+    if (!S.moran) notes.push('The Moran\u2019s I test checks whether the raw county residuals cluster geographically more than chance would give.');
+    if (notes.length) ps.push(`<p class="note">${notes.map(esc).join(' ')}</p>`);
+    box.innerHTML = ps.join(''); box.hidden = false;
+    $('regions').hidden = false;
+    if ($('regions').open) drawRegions();
+  }
+
+  function drawRegions() {
+    const g = d3.select('#region-plot'); g.selectAll('*').remove();
+    if (!S.fit) return;
+    const f = S.fit, kind = $('region-kind').value, minR = Math.max(2, +$('region-min').value || 20);
+    const groups = new Map();
+    f.idx.forEach((ri, k) => {
+      const fips = S.rowFips[ri]; if (!fips) return;
+      const ab = STATE_ABBR[fips.slice(0, 2)]; if (!ab) return;
+      const key = kind === 'state' ? ab : kind === 'division' ? divisionOf(ab) : regionOf(ab);
+      if (!key) return;
+      const w = f.w ? f.w[k] : 1, o = groups.get(key) || { sw: 0, swr: 0, rs: [], ws: [] };
+      o.sw += w; o.swr += w * f.resid[k]; o.rs.push(f.resid[k]); o.ws.push(w); groups.set(key, o);
+    });
+    const rows = [], small = [];
+    groups.forEach((o, key) => {
+      const n = o.rs.length, m = o.swr / o.sw;
+      if (n < minR) { small.push(key); return; }
+      // standard error of a weighted mean: sqrt(sum w^2 (r - m)^2) / sum w, scaled by n/(n-1)
+      const se = Math.sqrt(o.rs.reduce((s, r, i) => s + o.ws[i] ** 2 * (r - m) ** 2, 0) * n / (n - 1)) / o.sw;
+      rows.push({ key, n, m, lo: m - 1.96 * se, hi: m + 1.96 * se });
+    });
+    rows.sort((a, b) => b.m - a.m);
+    const lim = Math.max(+$('range').value, niceMax(d3.max(rows, r => Math.max(Math.abs(r.lo), Math.abs(r.hi))) || 0.1));
+    const row = 18, W = 600, m = { l: 140, r: 70, t: 8, b: 40 }, H = m.t + rows.length * row + m.b;
+    g.attr('viewBox', `0 0 ${W} ${H}`);
+    const x = d3.scaleLinear().domain([-lim, lim]).range([m.l, W - m.r]), bottom = m.t + rows.length * row;
+    g.append('g').attr('class', 'axis').attr('transform', `translate(0,${bottom})`).call(d3.axisBottom(x).ticks(7));
+    g.append('text').attr('x', (m.l + W - m.r) / 2).attr('y', bottom + 32).attr('text-anchor', 'middle').text('Mean residual (95% interval)');
+    g.append('line').attr('x1', x(0)).attr('x2', x(0)).attr('y1', m.t).attr('y2', bottom).attr('stroke', '#1B2429').attr('stroke-dasharray', '3 3');
+    const range = +$('range').value;
+    rows.forEach((r, i) => {
+      const cy = m.t + i * row + row / 2, sig = r.lo > 0 || r.hi < 0;
+      const c = RESID(0.5 + Math.max(-1, Math.min(1, r.m / range)) / 2);
+      g.append('line').attr('x1', x(Math.max(-lim, r.lo))).attr('x2', x(Math.min(lim, r.hi))).attr('y1', cy).attr('y2', cy).attr('stroke', sig ? '#1B2429' : '#9AA4AA');
+      g.append('circle').attr('cx', x(r.m)).attr('cy', cy).attr('r', 4.5).attr('fill', c).attr('stroke', '#1B2429').attr('stroke-width', sig ? 1.2 : 0.4)
+        .append('title').text(`${r.key}: ${r.m > 0 ? '+' : ''}${fmt(r.m)} (${fmt(r.lo)} to ${fmt(r.hi)}), n = ${r.n}`);
+      g.append('text').attr('x', m.l - 8).attr('y', cy + 4).attr('text-anchor', 'end').attr('font-weight', sig ? 600 : 400).text(r.key);
+      g.append('text').attr('x', W - m.r + 6).attr('y', cy + 4).attr('fill', '#56636B').text(`n = ${r.n}`);
+    });
+    $('region-note').textContent = `Unsmoothed weighted mean residuals of the respondents in each ${kind === 'state' ? 'state' : kind === 'division' ? 'Census division' : 'Census region'}. Dots use the map's colors; bold names and dark lines mark intervals that exclude zero.` +
+      (small.length ? ` Not shown (fewer than ${minR} respondents): ${small.sort().join(', ')}.` : '') +
+      (kind === 'state' && rows.length > 20 ? ' With this many groups, one or two intervals can exclude zero by chance alone.' : '');
+  }
+  $('regions').addEventListener('toggle', e => { if (e.target.open) drawRegions(); });
+  $('region-kind').addEventListener('change', drawRegions);
+  $('region-min').addEventListener('change', drawRegions);
 
   // ---------------- tabs ----------------
   function showTab(name) {

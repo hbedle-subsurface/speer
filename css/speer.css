@@ -238,3 +238,13 @@ input[type=number] { font: inherit; font-size: 14px; padding: 5px 6px; border: 1
 #shap-bar, #shap-swarm, #shap-dep { width: 100%; height: auto; display: block; max-width: 760px; }
 #shap-bar text, #shap-swarm text, #shap-dep text, #shap-int text { font-size: 11px; fill: var(--ink); }
 .pairs td button { font-size: 12px; padding: 2px 8px; margin-right: 4px; }
+
+/* ---------- reading the map ---------- */
+.map-read { margin-top: 10px; padding: 10px 14px; background: var(--paper); border-radius: var(--radius-s); font-size: 13px; line-height: 1.55; }
+.map-read p { margin: 0 0 6px; max-width: 110ch; }
+.map-read p:last-child { margin-bottom: 0; }
+.map-read .note { color: var(--warn); }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 3px; }
+details.regions { margin-top: 10px; font-size: 13px; }
+#region-plot { width: 100%; height: auto; display: block; max-width: 720px; }
+#region-plot text { font-size: 11px; fill: var(--ink); }

@@ -15,6 +15,10 @@ The survey file is read by the browser tab and never leaves the computer. No sur
 
 The map opens on a smoothed residual surface that fills in unsampled counties (see Smoothing below). It can also show the raw weighted mean residual in each county that has at least the chosen number of respondents. The color range is set with a slider and does not rescale when the minimum count changes, so the same color means the same residual throughout a session. The map can also show respondent counts or any weather variable.
 
+Below the map, a short reading of the current view is written from the model and the map settings: what red and blue mean for the chosen outcome (using the SPEER answer labels in `window.SPEER_SCALES` in `js/presets.js`, where they are known), how large the color range is relative to the answer scale, how the smoothing works at the current distance, how many respondents the colored counties draw on, and notes when the settings make the map easy to over-read (a low minimum, a very long or very short smoothing distance). The legend is labeled "lower than predicted" and "higher than predicted", and the Moran's I result is followed by a plain statement of what it means.
+
+A second panel, "Average residual by state or region", plots the unsmoothed weighted mean residual for each state, Census division or Census region with a 95% interval (the standard error of a weighted mean), in the map's colors. Groups below a minimum number of respondents (default 20) are left out and listed. This view shows which parts of the map pattern rest on enough respondents to stand apart from zero.
+
 The lower right panel plots county mean residuals against one weather variable and fits a county-level regression on all ticked weather variables, weighted by the number of respondents in each county.
 
 ## SPEER coding notes
