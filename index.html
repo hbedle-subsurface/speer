@@ -36,11 +36,27 @@
     <section class="step" id="step-place" data-locked>
       <h2><span class="step-num">2</span> Place respondents in counties</h2>
       <div class="seg" role="radiogroup" aria-label="Location column type">
-        <label><input type="radio" name="loc-kind" value="zip" checked> ZIP code</label>
+        <label><input type="radio" name="loc-kind" value="latlon" checked> Lat / long</label>
+        <label><input type="radio" name="loc-kind" value="zip"> ZIP code</label>
         <label><input type="radio" name="loc-kind" value="fips"> County FIPS</label>
       </div>
-      <label class="field">Column
-        <select id="loc-col"></select>
+      <div id="loc-one">
+        <label class="field">Column
+          <select id="loc-col"></select>
+        </label>
+      </div>
+      <div id="loc-two">
+        <div class="pair">
+          <label class="field">Latitude
+            <select id="lat-col"></select>
+          </label>
+          <label class="field">Longitude
+            <select id="lon-col"></select>
+          </label>
+        </div>
+      </div>
+      <label class="field">State column, to cross-check (optional)
+        <select id="state-col"></select>
       </label>
       <p class="status" id="place-status"></p>
     </section>
@@ -98,10 +114,13 @@
     <figure class="map-card">
       <div class="map-controls">
         <label>Show
-          <select id="map-layer"><option value="resid">Mean residual</option><option value="n">Respondents</option></select>
+          <select id="map-layer"><option value="smooth">Smoothed residual</option><option value="resid">Mean residual by county</option><option value="n">Respondents</option></select>
         </label>
-        <label>Minimum respondents per county <output id="minn-out">5</output>
+        <label><span id="minn-label">Minimum respondents per county</span> <output id="minn-out">5</output>
           <input type="range" id="minn" min="1" max="30" step="1" value="5">
+        </label>
+        <label id="bw-wrap">Smoothing distance <output id="bw-out">150 km</output>
+          <input type="range" id="bw" min="25" max="400" step="25" value="150">
         </label>
         <label id="range-wrap">Color range ± <output id="range-out">1.0</output>
           <input type="range" id="range" min="0.05" max="3" step="0.05" value="1">

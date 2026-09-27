@@ -9,6 +9,11 @@ Three public sources, each optional:
   climdiv NOAA nClimDiv county monthly temperature: warming relative to the
           1991-2020 normal and counts of unusually hot and cold months.
   fema    OpenFEMA disaster declarations by county.
+  perception
+          Variables matched to the SPEER weather perception items (Q15):
+          the 12 months before the survey compared with the preceding years,
+          for precipitation, heat, winter cold and drought, from nClimDiv,
+          Storm Events and the US Drought Monitor.
 
 Uses only the Python standard library.
 
@@ -140,47 +145,65 @@ def zone_to_counties(zone_file):
     return m
 
 
+_STORM_CACHE = {}
+_ZONES = None
+_UNMATCHED_ZONES = set()
+
+
+def storm_year(year, zone_file):
+    """Records for one year as (counties, group, date YYYYMMDD, deaths, damage USD)."""
+    global _ZONES
+    if year in _STORM_CACHE:
+        return _STORM_CACHE[year]
+    if _ZONES is None:
+        _ZONES = zone_to_counties(zone_file)
+    idx = listing(STORM_DIR)
+    files = sorted(re.findall(rf"StormEvents_details-ftp_v1\.0_d{year}_c\d{{8}}\.csv\.gz", idx))
+    if not files:
+        print(f"  no Storm Events details file for {year}, skipped")
+        _STORM_CACHE[year] = []
+        return []
+    raw = gzip.decompress(fetch(STORM_DIR + files[-1], files[-1], binary=True)).decode("latin-1")
+    recs = []
+    for r in csv.DictReader(io.StringIO(raw)):
+        et = r["EVENT_TYPE"].strip()
+        group = next((g for g, s in STORM_GROUPS.items() if et in s), None)
+        st = r["STATE_FIPS"].strip().zfill(2)
+        cz = r["CZ_FIPS"].strip().zfill(3)
+        if r["CZ_TYPE"] == "C":
+            counties = (st + cz,)
+        elif r["CZ_TYPE"] == "Z":
+            key = STATE_ABBR.get(st, "") + cz
+            counties = tuple(_ZONES.get(key, ()))
+            if not counties:
+                _UNMATCHED_ZONES.add(key)
+                continue
+        else:
+            continue  # marine zones
+        date = f"{r['BEGIN_YEARMONTH']}{r['BEGIN_DAY'].zfill(2)}"
+        d = sum(float(r[k] or 0) for k in ("DEATHS_DIRECT", "DEATHS_INDIRECT"))
+        dmg = parse_damage(r["DAMAGE_PROPERTY"]) + parse_damage(r["DAMAGE_CROPS"])
+        recs.append((counties, group, date, d, dmg))
+    print(f"  Storm Events {year} read")
+    _STORM_CACHE[year] = recs
+    return recs
+
+
 def storm_events(start, end, zone_file):
     print("Storm Events")
-    idx = listing(STORM_DIR)
-    zones = zone_to_counties(zone_file)
     days = defaultdict(lambda: defaultdict(set))   # county -> group -> set of dates
     deaths = defaultdict(float)
     damage = defaultdict(float)
-    unmatched_zones = set()
     for year in range(start, end + 1):
-        files = sorted(re.findall(rf"StormEvents_details-ftp_v1\.0_d{year}_c\d{{8}}\.csv\.gz", idx))
-        if not files:
-            print(f"  no details file for {year}, skipped")
-            continue
-        raw = gzip.decompress(fetch(STORM_DIR + files[-1], files[-1], binary=True)).decode("latin-1")
-        for r in csv.DictReader(io.StringIO(raw)):
-            et = r["EVENT_TYPE"].strip()
-            group = next((g for g, s in STORM_GROUPS.items() if et in s), None)
-            st = r["STATE_FIPS"].strip().zfill(2)
-            cz = r["CZ_FIPS"].strip().zfill(3)
-            if r["CZ_TYPE"] == "C":
-                counties = {st + cz}
-            elif r["CZ_TYPE"] == "Z":
-                key = STATE_ABBR.get(st, "") + cz
-                counties = zones.get(key, set())
-                if not counties:
-                    unmatched_zones.add(key)
-                    continue
-            else:
-                continue  # marine zones
-            date = f"{r['BEGIN_YEARMONTH']}{r['BEGIN_DAY'].zfill(2)}"
-            d = sum(float(r[k] or 0) for k in ("DEATHS_DIRECT", "DEATHS_INDIRECT"))
-            dmg = parse_damage(r["DAMAGE_PROPERTY"]) + parse_damage(r["DAMAGE_CROPS"])
+        for counties, group, date, d, dmg in storm_year(year, zone_file):
             share = 1 / len(counties)  # zone totals are split evenly across the zone's counties
             for c in counties:
                 if group:
                     days[c][group].add(date)
                 deaths[c] += d * share
                 damage[c] += dmg * share
-        print(f"  {year} read")
-    if unmatched_zones:
-        print(f"  {len(unmatched_zones)} forecast zones had no county match (zone boundaries change over time)")
+    if _UNMATCHED_ZONES:
+        print(f"  {len(_UNMATCHED_ZONES)} forecast zones had no county match (zone boundaries change over time)")
     out = defaultdict(dict)
     for c in set(days) | set(deaths):
         for g in STORM_GROUPS:
@@ -210,7 +233,8 @@ def read_climdiv(kind, idx):
             continue
         fips, year = st + line[2:5], int(line[7:11])
         vals = [float(v) for v in line[11:].split()[:12]]
-        data[fips][year] = [None if v <= -99 else v for v in vals]
+        missing = (lambda v: v < 0) if kind == "pcpn" else (lambda v: v <= -99)  # -9.99 / -99.99 flags
+        data[fips][year] = [None if missing(v) else v for v in vals]
     return data
 
 
@@ -308,12 +332,128 @@ def fema(start, end):
     return out, desc
 
 
+# ---------------- matched to the perception questions ----------------
+# SPEER Q15 asks whether rain and floods, heat, cold and winter storms, and
+# droughts happened more or less often "in the last twelve months, as compared
+# to the last few years". Each variable below compares the 12 months ending at
+# --perc-end with the mean of the --perc-base-years 12-month blocks before
+# them, oriented so that a positive value means "more" in the question's sense.
+
+def month_index(ym):
+    y, m = (int(v) for v in ym.split("-"))
+    return y * 12 + (m - 1)
+
+
+def ym_label(i):
+    return f"{i // 12}-{i % 12 + 1:02d}"
+
+
+def usdm_d1(first, last):
+    """Weekly percent of county area in D1 or worse, keyed county -> month index -> [values]."""
+    start = f"{first % 12 + 1}/1/{first // 12}"
+    end = f"{last % 12 + 1}/28/{last // 12}"
+    out = defaultdict(lambda: defaultdict(list))
+    for st in sorted(set(STATE_ABBR.values())):
+        url = (f"https://usdmdataservices.unl.edu/api/CountyStatistics/GetDroughtSeverityStatisticsByAreaPercent"
+               f"?aoi={st}&startdate={start}&enddate={end}&statisticsType=1")
+        text = fetch(url, f"usdm_{st}_{first}_{last}.csv")
+        for r in csv.DictReader(io.StringIO(text)):
+            f = (r.get("FIPS") or "").strip().zfill(5)
+            md = (r.get("MapDate") or "").strip()
+            try:
+                v = float(r.get("D1"))
+            except (TypeError, ValueError):
+                continue
+            if len(md) >= 6 and f.strip("0"):
+                out[f][int(md[:4]) * 12 + int(md[4:6]) - 1].append(v)
+    return out
+
+
+def perception(perc_end, base_years, zone_file):
+    print("Perception-matched variables")
+    E = month_index(perc_end)
+    recent = range(E - 11, E + 1)
+    blocks = [range(E - 12 * b - 11, E - 12 * b + 1) for b in range(1, base_years + 1)]
+    first = blocks[-1][0]
+    base_months = [m for blk in blocks for m in blk]
+    win = f"{ym_label(recent[0])} to {ym_label(E)}"
+    base = f"{ym_label(first)} to {ym_label(recent[0] - 1)}"
+    out = defaultdict(dict)
+
+    def mean(vals):
+        vals = [v for v in vals if v is not None]
+        return sum(vals) / len(vals) if vals else None
+
+    # nClimDiv monthly precipitation and temperature
+    idx = listing(CLIMDIV_DIR)
+    pcp, tmax, tmin = (read_climdiv(k, idx) for k in ("pcpn", "tmax", "tmin"))
+    get = lambda d, f, m: d.get(f, {}).get(m // 12, [None] * 12)[m % 12]
+    for f in pcp:
+        r_tot = [get(pcp, f, m) for m in recent]
+        b_tot = [[get(pcp, f, m) for m in blk] for blk in blocks]
+        if None not in r_tot and all(None not in t for t in b_tot):
+            b_mean = sum(sum(t) for t in b_tot) / len(b_tot)
+            if b_mean > 0:
+                out[f]["pc_precip_pct"] = round(100 * (sum(r_tot) / b_mean - 1), 2)
+        r, bm = mean(get(tmax, f, m) for m in recent), mean(get(tmax, f, m) for m in base_months)
+        if r is not None and bm is not None:
+            out[f]["pc_tmax_warmer_f"] = round(r - bm, 3)
+        winter = lambda months: [m for m in months if m % 12 in (11, 0, 1)]
+        r, bm = mean(get(tmin, f, m) for m in winter(recent)), mean(get(tmin, f, m) for m in winter(base_months))
+        if r is not None and bm is not None:
+            out[f]["pc_winter_colder_f"] = round(bm - r, 3)  # positive = recent winter colder
+
+    # Storm Events event-days by group, recent window minus baseline block mean
+    groups = {"flood": ["flood"], "heat": ["heat"], "coldwinter": ["cold", "winter"], "drought": ["drought"]}
+    counts = defaultdict(lambda: defaultdict(set))  # (county, group) -> block -> dates
+    for year in range(first // 12, E // 12 + 1):
+        for counties, group, date, _, _ in storm_year(year, zone_file):
+            m = int(date[:4]) * 12 + int(date[4:6]) - 1
+            if m < first or m > E:
+                continue
+            blk = 0 if m >= recent[0] else (recent[0] - 1 - m) // 12 + 1
+            for name, gs in groups.items():
+                if group in gs:
+                    for c in counties:
+                        counts[(c, name)][blk].add(date)
+    for (c, name), by in counts.items():
+        out[c][f"pc_{name}_days_more"] = round(len(by.get(0, ())) - sum(len(by.get(b, ())) for b in range(1, base_years + 1)) / base_years, 2)
+
+    # US Drought Monitor
+    try:
+        d1 = usdm_d1(first, E)
+        for f, by in d1.items():
+            r = mean(v for m in recent for v in by.get(m, []))
+            bm = mean(v for m in base_months for v in by.get(m, []))
+            if r is not None and bm is not None:
+                out[f]["pc_drought_area_more"] = round(r - bm, 2)
+    except Exception as e:  # the drought service is separate from NOAA; keep the rest if it fails
+        print(f"  US Drought Monitor download failed ({e}); pc_drought_area_more left out")
+
+    desc = {
+        "pc_precip_pct": f"Precipitation {win} as percent above (+) or below (-) the mean 12-month total for {base} (nClimDiv); matches WxPerc_RainFlood",
+        "pc_flood_days_more": f"Flood event-days {win} minus the mean per 12 months for {base} (Storm Events); matches WxPerc_RainFlood",
+        "pc_tmax_warmer_f": f"Mean daily maximum temperature {win} minus {base}, degrees F (nClimDiv); matches WxPerc_HotHeat",
+        "pc_heat_days_more": f"Heat event-days {win} minus the mean per 12 months for {base} (Storm Events); matches WxPerc_HotHeat",
+        "pc_winter_colder_f": f"December-February mean daily minimum in {base} minus the winter in {win}, degrees F; positive means the recent winter was colder; matches WxPerc_ColdWinter",
+        "pc_coldwinter_days_more": f"Cold and winter storm event-days {win} minus the mean per 12 months for {base} (Storm Events); matches WxPerc_ColdWinter",
+        "pc_drought_days_more": f"Drought event-days {win} minus the mean per 12 months for {base} (Storm Events); matches WxPerc_Droughts",
+        "pc_drought_area_more": f"Mean weekly percent of county area in D1 or worse drought, {win} minus {base} (US Drought Monitor); matches WxPerc_Droughts",
+    }
+    return out, desc
+
+
 # ---------------- main ----------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--start", type=int, default=2014)
     ap.add_argument("--end", type=int, default=2023)
-    ap.add_argument("--sources", nargs="+", default=["storm", "climdiv", "fema"], choices=["storm", "climdiv", "fema"])
+    ap.add_argument("--sources", nargs="+", default=["storm", "climdiv", "fema", "perception"],
+                    choices=["storm", "climdiv", "fema", "perception"])
+    ap.add_argument("--perc-end", default="2024-07",
+                    help="last full month before the survey, YYYY-MM (SPEER fieldwork began August 16, 2024)")
+    ap.add_argument("--perc-base-years", type=int, default=5,
+                    help="number of 12-month blocks before the recent year used as 'the last few years'")
     ap.add_argument("--zone-file", help="local NWS zone-county correlation file (bpDDmmYY.dbx)")
     ap.add_argument("--out-dir", default=OUT_DIR)
     args = ap.parse_args()
@@ -325,11 +465,14 @@ def main():
         t, d = climdiv(args.start, args.end); tables.append(t); desc.update(d)
     if "fema" in args.sources:
         t, d = fema(args.start, args.end); tables.append(t); desc.update(d)
+    if "perception" in args.sources:
+        t, d = perception(args.perc_end, args.perc_base_years, args.zone_file); tables.append(t); desc.update(d)
 
     counties = sorted(set().union(*[t.keys() for t in tables]))
     cols = list(desc.keys())
     # counties absent from Storm Events or FEMA had no events: those counts are 0, not missing
-    zero_fill = [c for c in cols if c.startswith("se_") or c.startswith("fema_")]
+    zero_fill = [c for c in cols if c.startswith("se_") or c.startswith("fema_") or
+                 (c.startswith("pc_") and c.endswith("_days_more"))]
     os.makedirs(args.out_dir, exist_ok=True)
     out = os.path.join(args.out_dir, "county_weather.csv")
     with open(out, "w", newline="") as f:

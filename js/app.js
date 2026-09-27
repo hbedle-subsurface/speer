@@ -17,6 +17,8 @@
     county: new Map(),          // fips -> {n, sumW, mean}
     topo: null, countyName: new Map(), stateName: new Map(), neighbors: new Map(),
     moran: null,
+    centroid: new Map(),        // fips -> [lat, lon] in radians
+    smooth: null, smoothKey: '',
   };
 
   // ---------------- loading ----------------
@@ -54,7 +56,8 @@
   function isMissing(v, miss) {
     if (v == null) return true;
     const t = String(v).trim();
-    return t === '' || t.toUpperCase() === 'NA' || t.toUpperCase() === 'NAN' || miss.has(t);
+    const u = t.toUpperCase();
+    return t === '' || u === 'NA' || u === 'NAN' || u === '#NULL!' || t === '.' || miss.has(t);
   }
   const num = v => { const x = Number(String(v).trim()); return isFinite(x) ? x : NaN; };
 
@@ -85,9 +88,15 @@
   function onSurveyLoaded() {
     $('step-place').removeAttribute('data-locked');
     $('step-model').removeAttribute('data-locked');
-    const guessLoc = S.cols.find(c => /zip/i.test(c)) || S.cols.find(c => /fips|county/i.test(c));
-    fillSelect($('loc-col'), S.cols, { none: 'Choose a column', pick: guessLoc });
-    if (guessLoc && !/zip/i.test(guessLoc)) document.querySelector('input[name=loc-kind][value=fips]').checked = true;
+    const find = re => S.cols.find(c => re.test(c));
+    const lat = find(/^lat(itude)?$/i) || find(/latitude/i), lon = find(/^(lon|lng|long|longitude)$/i) || find(/longitude/i);
+    const zip = find(/zip/i), fips = find(/fips|county/i);
+    fillSelect($('lat-col'), S.cols, { none: 'Choose', pick: lat });
+    fillSelect($('lon-col'), S.cols, { none: 'Choose', pick: lon });
+    fillSelect($('loc-col'), S.cols, { none: 'Choose a column', pick: zip || fips });
+    fillSelect($('state-col'), S.cols, { none: 'None', pick: find(/^state$/i) });
+    const kind = (lat && lon) ? 'latlon' : zip ? 'zip' : fips ? 'fips' : 'latlon';
+    document.querySelector(`input[name=loc-kind][value=${kind}]`).checked = true;
     fillSelect($('dv-col'), S.cols, { none: 'Choose a column' });
     fillSelect($('wt-col'), S.cols, { none: 'None (unweighted)', pick: S.cols.find(c => /^weight|wt$|_wt|weight_/i.test(c)) });
     S.ivOn.clear(); S.ivKind = {};
@@ -103,9 +112,10 @@
 
   function renderIvList() {
     const f = $('iv-filter').value.toLowerCase();
-    const dv = $('dv-col').value, loc = $('loc-col').value, wt = $('wt-col').value;
+    const dv = $('dv-col').value, wt = $('wt-col').value;
+    const locCols = new Set([$('loc-col').value, $('lat-col').value, $('lon-col').value].filter(Boolean));
     $('iv-list').innerHTML = S.cols
-      .filter(c => c !== dv && c !== loc && c !== wt && c.toLowerCase().includes(f))
+      .filter(c => c !== dv && c !== wt && !locCols.has(c) && c.toLowerCase().includes(f))
       .map(c => `<div class="iv-row"><input type="checkbox" data-col="${esc(c)}" ${S.ivOn.has(c) ? 'checked' : ''} aria-label="Use ${esc(c)}">
         <span class="name" title="${esc(c)}">${esc(c)}</span>
         <button type="button" class="type" data-col="${esc(c)}" data-kind="${S.ivKind[c]}">${S.ivKind[c] === 'number' ? 'number' : 'category'}</button></div>`)
@@ -162,18 +172,41 @@
     return t.padStart(5, '0');
   }
 
+  function locKind() { return document.querySelector('input[name=loc-kind]:checked').value; }
+
   async function placeRespondents() {
-    const col = $('loc-col').value, kind = document.querySelector('input[name=loc-kind]:checked').value;
-    const out = $('place-status');
+    const kind = locKind(), out = $('place-status');
+    $('loc-one').hidden = kind === 'latlon'; $('loc-two').hidden = kind !== 'latlon';
     S.rowFips = new Array(S.rows.length).fill(null);
-    if (!col) { out.textContent = 'Choose the column that holds each respondent\'s location.'; return; }
-    let matched = 0, split = 0, bad = 0, unknown = 0;
-    if (kind === 'zip') {
+    if (!S.rows.length) return;
+    const col = $('loc-col').value, latC = $('lat-col').value, lonC = $('lon-col').value;
+    if (kind === 'latlon' ? !(latC && lonC) : !col) { out.textContent = 'Choose the column(s) that hold each respondent\'s location.'; return; }
+    let matched = 0, bad = 0, unknown = 0, note = '';
+    if (kind === 'latlon') {
+      if (!countyIndex) await mapReady;
+      let near = 0;
+      const pairs = new Map();
+      S.rows.forEach((r, i) => {
+        const la = num(r[latC]), lo = num(r[lonC]);
+        if (!isFinite(la) || !isFinite(lo) || String(r[latC]).trim() === '') { bad++; return; }
+        const key = `${la},${lo}`; pairs.set(key, (pairs.get(key) || 0) + 1);
+        const hit = countyAt(la, lo);
+        if (!hit) { unknown++; return; }
+        S.rowFips[i] = hit.fips; matched++;
+        if (hit.near) near++;
+      });
+      const [topKey, topN] = [...pairs.entries()].sort((x, y) => y[1] - x[1])[0] || ['', 0];
+      note = (unknown ? ` ${unknown} points fall outside the US county map.` : '') +
+        (near ? ` ${near} points just off a county edge (usually coastline) were assigned to the nearest county.` : '') +
+        ` ${pairs.size.toLocaleString()} distinct coordinate pairs.` +
+        (topN > Math.max(5, 0.01 * matched) ? ` <span class="warn">${topN} respondents share one location (${esc(topKey)}); a single repeated point can be a geolocation default.</span>` : '');
+    } else if (kind === 'zip') {
       const zc = await loadZipCounty();
       if (!zc) {
-        out.innerHTML = '<span class="err">data/zip_county.csv was not found. Build it with scripts/build_zip_county.py (see the README), or switch to a county FIPS column.</span>';
+        out.innerHTML = '<span class="err">data/zip_county.csv was not found. Build it with scripts/build_zip_county.py (see the README), or use another location type.</span>';
         return;
       }
+      let split = 0;
       S.rows.forEach((r, i) => {
         const z = cleanZip(r[col]);
         if (!z) { bad++; return; }
@@ -182,9 +215,7 @@
         S.rowFips[i] = hit.fips; matched++;
         if (hit.share < 0.9) split++;
       });
-      out.innerHTML = `<b>${matched.toLocaleString()}</b> of ${S.rows.length.toLocaleString()} respondents placed in a county.` +
-        (unknown ? ` ${unknown} ZIPs have no Census ZCTA (often PO box or business ZIPs).` : '') +
-        (bad ? ` ${bad} blank or malformed.` : '') +
+      note = (unknown ? ` ${unknown} ZIPs have no Census ZCTA (often PO box or business ZIPs).` : '') +
         (split ? ` <span class="warn">${split} live in ZIPs that cross a county line; each is assigned to the county holding most of the ZIP's land area.</span>` : '');
     } else {
       S.rows.forEach((r, i) => {
@@ -193,15 +224,67 @@
         if (S.countyName.size && !S.countyName.has(f)) { unknown++; return; }
         S.rowFips[i] = f; matched++;
       });
-      out.innerHTML = `<b>${matched.toLocaleString()}</b> of ${S.rows.length.toLocaleString()} respondents placed in a county.` +
-        (unknown ? ` ${unknown} codes are not on the county map.` : '') + (bad ? ` ${bad} blank or malformed.` : '');
+      note = unknown ? ` ${unknown} codes are not on the county map.` : '';
+    }
+    // optional cross-check against a reported state
+    const stC = $('state-col').value;
+    if (stC) {
+      let mism = 0;
+      S.rows.forEach((r, i) => {
+        const f = S.rowFips[i]; if (!f) return;
+        const st = String(r[stC] ?? '').trim().toUpperCase();
+        if (!st) return;
+        const want = STATE_ABBR[f.slice(0, 2)], wantName = (S.stateName.get(f.slice(0, 2)) || '').toUpperCase();
+        if (st !== want && st !== wantName && st !== f.slice(0, 2)) mism++;
+      });
+      note += mism ? ` <span class="warn">${mism} respondents are placed in a county outside the state in ${esc(stC)}.</span>` : ` All placements agree with ${esc(stC)}.`;
     }
     const counties = new Set(S.rowFips.filter(Boolean)).size;
-    out.innerHTML += ` ${counties.toLocaleString()} counties represented.`;
+    out.innerHTML = `<b>${matched.toLocaleString()}</b> of ${S.rows.length.toLocaleString()} respondents placed in ${counties.toLocaleString()} counties.` +
+      (bad ? ` ${bad} blank or malformed.` : '') + note;
     if (S.fit) aggregateCounties();
   }
-  $('loc-col').addEventListener('change', () => { renderIvList(); placeRespondents(); });
+  ['loc-col', 'lat-col', 'lon-col', 'state-col'].forEach(id => $(id).addEventListener('change', () => { renderIvList(); placeRespondents(); }));
   document.querySelectorAll('input[name=loc-kind]').forEach(r => r.addEventListener('change', placeRespondents));
+
+  const STATE_ABBR = { '01': 'AL', '02': 'AK', '04': 'AZ', '05': 'AR', '06': 'CA', '08': 'CO', '09': 'CT', '10': 'DE', '11': 'DC', '12': 'FL', '13': 'GA', '15': 'HI', '16': 'ID', '17': 'IL', '18': 'IN', '19': 'IA', '20': 'KS', '21': 'KY', '22': 'LA', '23': 'ME', '24': 'MD', '25': 'MA', '26': 'MI', '27': 'MN', '28': 'MS', '29': 'MO', '30': 'MT', '31': 'NE', '32': 'NV', '33': 'NH', '34': 'NJ', '35': 'NM', '36': 'NY', '37': 'NC', '38': 'ND', '39': 'OH', '40': 'OK', '41': 'OR', '42': 'PA', '44': 'RI', '45': 'SC', '46': 'SD', '47': 'TN', '48': 'TX', '49': 'UT', '50': 'VT', '51': 'VA', '53': 'WA', '54': 'WV', '55': 'WI', '56': 'WY' };
+
+  // point-in-county on the pre-projected us-atlas outlines
+  // (us-atlas albers files use geoAlbersUsa().scale(1300).translate([487.5, 305]))
+  const PROJ = d3.geoAlbersUsa().scale(1300).translate([487.5, 305]);
+  let countyIndex = null;
+  function buildCountyIndex(features) {
+    countyIndex = features.map(f => {
+      const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      polys.forEach(p => p[0].forEach(([x, y]) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }));
+      return { fips: f.id, polys, bb: [x0, y0, x1, y1] };
+    });
+  }
+  function inside(c, pt) {
+    return c.polys.some(p => d3.polygonContains(p[0], pt) && !p.slice(1).some(h => d3.polygonContains(h, pt)));
+  }
+  function segDist(p, a, b) {
+    const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy;
+    const t = L ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L)) : 0;
+    return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+  }
+  function countyAt(lat, lon) {
+    const pt = PROJ([lon, lat]);
+    if (!pt) return null;
+    const TOL = 2.5; // map units, about 10 km
+    let best = null, bestD = TOL;
+    for (const c of countyIndex) {
+      const [x0, y0, x1, y1] = c.bb;
+      if (pt[0] < x0 - TOL || pt[0] > x1 + TOL || pt[1] < y0 - TOL || pt[1] > y1 + TOL) continue;
+      if (inside(c, pt)) return { fips: c.fips, near: false };
+      for (const p of c.polys) for (const ring of p) for (let k = 1; k < ring.length; k++) {
+        const d = segDist(pt, ring[k - 1], ring[k]);
+        if (d < bestD) { bestD = d; best = c.fips; }
+      }
+    }
+    return best ? { fips: best, near: true } : null;
+  }
 
   // ---------------- weather table ----------------
   async function loadDefaultWeather() {
@@ -235,8 +318,10 @@
       <span class="name" title="${esc(v)}">${esc(v)}</span>${S.wxDesc[v] ? `<span class="desc">${esc(S.wxDesc[v])}</span>` : ''}</label>`).join('');
     $('add-weather').disabled = false;
     const layer = $('map-layer');
-    layer.innerHTML = '<option value="resid">Mean residual</option><option value="n">Respondents</option>' +
+    const was = layer.value;
+    layer.innerHTML = '<option value="smooth">Smoothed residual</option><option value="resid">Mean residual by county</option><option value="n">Respondents</option>' +
       vars.map(v => `<option value="wx:${esc(v)}">${esc(v)}</option>`).join('');
+    if ([...layer.options].some(o => o.value === was)) layer.value = was;
     fillSelect($('scatter-x'), vars);
     if (S.fit) { drawCountyAnalysis(); drawMap(); }
   }
@@ -343,7 +428,7 @@
 
   // ---------------- county aggregation ----------------
   function aggregateCounties() {
-    const f = S.fit; S.county = new Map(); S.moran = null; $('moran-out').textContent = '';
+    const f = S.fit; S.county = new Map(); S.moran = null; S.smooth = null; $('moran-out').textContent = '';
     if (!f) return;
     f.idx.forEach((ri, k) => {
       const fips = S.rowFips[ri]; if (!fips) return;
@@ -379,9 +464,19 @@
     S.topo.objects.states.geometries.forEach(g => S.stateName.set(g.id, g.properties.name));
     geoms.forEach(g => S.countyName.set(g.id, g.properties.name));
     topojson.neighbors(geoms).forEach((nb, i) => S.neighbors.set(geoms[i].id, nb.map(j => geoms[j].id)));
+    const feats = topojson.feature(S.topo, S.topo.objects.counties).features;
+    buildCountyIndex(feats);
+    const pat = svg.append('defs').append('pattern').attr('id', 'nodata').attr('patternUnits', 'userSpaceOnUse')
+      .attr('width', 5).attr('height', 5).attr('patternTransform', 'rotate(45)');
+    pat.append('rect').attr('width', 5).attr('height', 5).attr('fill', '#EEF0F1');
+    pat.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 5).attr('stroke', '#C3CACD').attr('stroke-width', 1.4);
     const path = d3.geoPath();
+    feats.forEach(f => {
+      const ll = PROJ.invert(path.centroid(f));
+      if (ll) S.centroid.set(f.id, [ll[1] * Math.PI / 180, ll[0] * Math.PI / 180]);
+    });
     countyPaths = svg.append('g').selectAll('path')
-      .data(topojson.feature(S.topo, S.topo.objects.counties).features)
+      .data(feats)
       .join('path').attr('class', 'county').attr('d', path).attr('fill', '#E6E9EA');
     svg.append('path').attr('class', 'states').attr('d', path(topojson.mesh(S.topo, S.topo.objects.states, (a, b) => a !== b)));
     svg.append('path').attr('class', 'nation').attr('d', path(topojson.feature(S.topo, S.topo.objects.nation)));
@@ -391,12 +486,45 @@
 
   function layer() { return $('map-layer').value; }
 
+  // Gaussian kernel smoothing of residuals between county centroids.
+  // Each county's value is the survey-weighted mean of respondent residuals,
+  // with respondents weighted by exp(-d^2 / 2h^2) of the distance from their
+  // county's centroid. neff is the kernel-weighted respondent count.
+  function smoothed() {
+    const h = +$('bw').value, key = `${h}|${S.county.size}|${S.fit ? S.fit.n + S.fit.dv : ''}`;
+    if (S.smooth && S.smoothKey === key) return S.smooth;
+    const R = 6371, cut = 3 * h;
+    const src = [...S.county].map(([f, c]) => ({ ll: S.centroid.get(f), c })).filter(d => d.ll);
+    const out = new Map();
+    S.centroid.forEach(([la1, lo1], f) => {
+      let sw = 0, swr = 0, ne = 0;
+      const cos1 = Math.cos(la1);
+      for (const { ll: [la2, lo2], c } of src) {
+        const dla = la2 - la1, dlo = lo2 - lo1;
+        if (Math.abs(dla) * R > cut) continue;
+        const a = Math.sin(dla / 2) ** 2 + cos1 * Math.cos(la2) * Math.sin(dlo / 2) ** 2;
+        const d = 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+        if (d > cut) continue;
+        const k = Math.exp(-0.5 * (d / h) ** 2);
+        sw += k * c.sumW; swr += k * c.sumWR; ne += k * c.n;
+      }
+      if (sw > 0) out.set(f, { mean: swr / sw, neff: ne });
+    });
+    S.smooth = out; S.smoothKey = key;
+    return out;
+  }
+
   function drawMap() {
     if (!countyPaths) return;
     const L = layer(), range = +$('range').value, mn = minN();
-    $('range-wrap').style.visibility = L === 'resid' ? 'visible' : 'hidden';
+    $('range-wrap').style.visibility = (L === 'resid' || L === 'smooth') ? 'visible' : 'hidden';
+    $('bw-wrap').style.display = L === 'smooth' ? '' : 'none';
+    $('minn-label').textContent = L === 'smooth' ? 'Minimum respondents within smoothing distance' : 'Minimum respondents per county';
     let fill;
-    if (L === 'resid') {
+    if (L === 'smooth') {
+      const sm = S.fit ? smoothed() : new Map();
+      fill = id => { const c = sm.get(id); return c && c.neff >= mn ? RESID(0.5 + Math.max(-1, Math.min(1, c.mean / range)) / 2) : null; };
+    } else if (L === 'resid') {
       fill = id => { const c = S.county.get(id); return c && c.n >= mn ? RESID(0.5 + Math.max(-1, Math.min(1, c.mean / range)) / 2) : null; };
     } else if (L === 'n') {
       const s = d3.scaleLog().domain([1, 100]).clamp(true);
@@ -405,7 +533,7 @@
       const v = L.slice(3), dom = wxDomain(v);
       fill = id => { const x = S.wx?.get(id)?.[v]; return x != null && isFinite(x) ? SEQ(Math.max(0, Math.min(1, (x - dom[0]) / (dom[1] - dom[0] || 1)))) : null; };
     }
-    countyPaths.attr('fill', d => fill(d.id) || (S.county.has(d.id) ? '#D5DADC' : '#E6E9EA'));
+    countyPaths.attr('fill', d => fill(d.id) || (L === 'smooth' ? (S.fit ? 'url(#nodata)' : '#E6E9EA') : S.county.has(d.id) ? '#D5DADC' : '#E6E9EA'));
     drawLegend();
   }
 
@@ -422,7 +550,8 @@
     const g = d3.select('#legend'); g.selectAll('*').remove();
     const L = layer(), W = 240, x0 = 10;
     let interp, lo, hi, title;
-    if (L === 'resid') { const r = +$('range').value; interp = RESID; lo = -r; hi = r; title = S.fit?.kind === 'logit' ? 'Mean residual (observed minus predicted probability)' : 'Mean residual (observed minus predicted)'; }
+    if (L === 'smooth') { const r = +$('range').value; interp = RESID; lo = -r; hi = r; title = `Smoothed residual (Gaussian kernel, ${$('bw').value} km)`; }
+    else if (L === 'resid') { const r = +$('range').value; interp = RESID; lo = -r; hi = r; title = S.fit?.kind === 'logit' ? 'Mean residual (observed minus predicted probability)' : 'Mean residual (observed minus predicted)'; }
     else if (L === 'n') { interp = SEQ; lo = 1; hi = 100; title = 'Respondents per county (log scale)'; }
     else { interp = SEQ; [lo, hi] = wxDomain(L.slice(3)); title = L.slice(3); }
     const defs = g.append('defs').append('linearGradient').attr('id', 'lg');
@@ -431,10 +560,15 @@
     g.append('rect').attr('x', x0).attr('y', 16).attr('width', W).attr('height', 10).attr('fill', 'url(#lg)');
     const lab = v => Math.abs(v) >= 100 ? d3.format(',.0f')(v) : d3.format('.2~f')(v);
     [[lo, 'start', x0], [hi, 'end', x0 + W]].forEach(([v, a, x]) =>
-      g.append('text').attr('x', x).attr('y', 40).attr('text-anchor', a).attr('font-size', 11).attr('fill', '#1B2429').text((L === 'resid' && v > 0 ? '+' : '') + lab(v)));
-    if (L === 'resid') g.append('text').attr('x', x0 + W / 2).attr('y', 40).attr('text-anchor', 'middle').attr('font-size', 11).attr('fill', '#1B2429').text('0');
-    g.append('rect').attr('x', x0 + W + 16).attr('y', 16).attr('width', 12).attr('height', 10).attr('fill', '#D5DADC');
-    g.append('text').attr('x', x0 + W + 32).attr('y', 25).attr('font-size', 11).attr('fill', '#56636B').text('< min n');
+      g.append('text').attr('x', x).attr('y', 40).attr('text-anchor', a).attr('font-size', 11).attr('fill', '#1B2429').text(((L === 'resid' || L === 'smooth') && v > 0 ? '+' : '') + lab(v)));
+    if (L === 'resid' || L === 'smooth') g.append('text').attr('x', x0 + W / 2).attr('y', 40).attr('text-anchor', 'middle').attr('font-size', 11).attr('fill', '#1B2429').text('0');
+    if (L === 'smooth') {
+      const lp = g.select('defs').append('pattern').attr('id', 'nodata-lg').attr('patternUnits', 'userSpaceOnUse').attr('width', 4).attr('height', 4).attr('patternTransform', 'rotate(45)');
+      lp.append('rect').attr('width', 4).attr('height', 4).attr('fill', '#EEF0F1');
+      lp.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 4).attr('stroke', '#C3CACD').attr('stroke-width', 1.2);
+    }
+    g.append('rect').attr('x', x0 + W + 16).attr('y', 16).attr('width', 12).attr('height', 10).attr('fill', L === 'smooth' ? 'url(#nodata-lg)' : '#D5DADC');
+    g.append('text').attr('x', x0 + W + 32).attr('y', 25).attr('font-size', 11).attr('fill', '#56636B').text(L === 'smooth' ? 'too few nearby' : '< min n');
   }
 
   function showTip(ev, d) {
@@ -444,6 +578,7 @@
     h += c ? `${c.n} respondent${c.n > 1 ? 's' : ''}, mean residual ${c.mean > 0 ? '+' : ''}${fmt(c.mean)}` : 'No fitted respondents';
     if (c && c.n < minN()) h += ' (below min n)';
     const L = layer();
+    if (L === 'smooth' && S.fit) { const sm = smoothed().get(d.id); h += sm ? `<br>Smoothed ${sm.mean > 0 ? '+' : ''}${fmt(sm.mean)} from ${fmt(sm.neff, 1)} weighted respondents nearby` : '<br>No respondents within smoothing distance'; }
     if (L.startsWith('wx:')) { const x = S.wx?.get(d.id)?.[L.slice(3)]; h += `<br>${esc(L.slice(3))}: ${x != null && isFinite(x) ? fmt(x, 2) : 'no data'}`; }
     tip.innerHTML = h; tip.hidden = false;
     const box = $('map').parentElement.getBoundingClientRect();
@@ -455,6 +590,7 @@
   function hideTip() { $('tip').hidden = true; countyPaths.classed('hover', false); }
 
   $('map-layer').addEventListener('change', drawMap);
+  $('bw').addEventListener('input', () => { $('bw-out').textContent = $('bw').value + ' km'; drawMap(); });
   $('range').addEventListener('input', () => { $('range-out').textContent = fmt(+$('range').value, 2); drawMap(); drawCountyAnalysis(); });
   $('minn').addEventListener('input', () => {
     $('minn-out').textContent = $('minn').value; S.moran = null; $('moran-out').textContent = '';
@@ -475,9 +611,17 @@
 
   $('export-county').addEventListener('click', () => {
     const vars = S.wxVars.filter(v => S.wxOn.has(v));
-    const lines = [['fips', 'county', 'state', 'n', 'mean_residual', ...vars].join(',')];
-    qualifying().forEach((c, f) => lines.push([f, `"${S.countyName.get(f) || ''}"`, `"${S.stateName.get(f.slice(0, 2)) || ''}"`, c.n, c.mean.toFixed(5),
-      ...vars.map(v => { const x = S.wx?.get(f)?.[v]; return x != null && isFinite(x) ? x : ''; })].join(',')));
+    const sm = smoothed(), bw = $('bw').value;
+    const lines = [['fips', 'county', 'state', 'n', 'mean_residual', `smoothed_residual_${bw}km`, 'smoothed_neff', ...vars].join(',')];
+    const q = qualifying(), mn = minN();
+    const ids = [...S.centroid.keys()].filter(f => q.has(f) || (sm.get(f) && sm.get(f).neff >= mn)).sort();
+    ids.forEach(f => {
+      const c = q.get(f), m = sm.get(f);
+      lines.push([f, `"${S.countyName.get(f) || ''}"`, `"${S.stateName.get(f.slice(0, 2)) || ''}"`,
+        c ? c.n : (S.county.get(f)?.n || 0), c ? c.mean.toFixed(5) : '',
+        m && m.neff >= mn ? m.mean.toFixed(5) : '', m ? m.neff.toFixed(2) : '',
+        ...vars.map(v => { const x = S.wx?.get(f)?.[v]; return x != null && isFinite(x) ? x : ''; })].join(','));
+    });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
     a.download = `speer_counties_${S.fit.dv.replace(/\W+/g, '_')}_min${minN()}.csv`;
@@ -543,5 +687,7 @@
   }
 
   // ---------------- start ----------------
-  initMap().then(loadDefaultWeather);
+  const mapReady = initMap();
+  placeRespondents();
+  mapReady.then(loadDefaultWeather);
 })();
