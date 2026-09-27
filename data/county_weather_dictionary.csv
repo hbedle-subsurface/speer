@@ -1,0 +1,32 @@
+variable,description
+se_heat_days,"Days with at least one Heat and Excessive Heat event reported, 2014-2023 (NOAA Storm Events)"
+se_cold_days,"Days with at least one Cold/Wind Chill, Extreme Cold and Frost/Freeze event reported, 2014-2023 (NOAA Storm Events)"
+se_winter_days,"Days with at least one Winter Storm, Blizzard, Ice Storm and heavy snow event reported, 2014-2023 (NOAA Storm Events)"
+se_tornado_days,"Days with at least one Tornado event reported, 2014-2023 (NOAA Storm Events)"
+se_hail_wind_days,"Days with at least one Hail and Thunderstorm Wind event reported, 2014-2023 (NOAA Storm Events)"
+se_flood_days,"Days with at least one Flash Flood, Flood and Coastal Flood event reported, 2014-2023 (NOAA Storm Events)"
+se_tropical_days,"Days with at least one hurricane, tropical storm and storm surge event reported, 2014-2023 (NOAA Storm Events)"
+se_wildfire_days,"Days with at least one Wildfire event reported, 2014-2023 (NOAA Storm Events)"
+se_drought_days,"Days with at least one Drought event reported, 2014-2023 (NOAA Storm Events)"
+se_deaths,"Direct and indirect deaths in Storm Events reports, all event types, 2014-2023"
+se_damage_musd,"Property and crop damage in Storm Events reports, millions of USD (nominal), all event types, 2014-2023"
+nc_tavg_anom_f,"Mean temperature 2014-2023 minus the 1991-2020 mean, degrees F (NOAA nClimDiv)"
+nc_hot_months,Months out of 120 in 2014-2023 with mean daily maximum above the county's 1991-2020 90th percentile for that month
+nc_cold_months,Months out of 120 in 2014-2023 with mean daily minimum below the county's 1991-2020 10th percentile for that month
+nc_summer_tmax_f,"Mean June-August daily maximum temperature, 2014-2023, degrees F"
+nc_winter_tmin_f,"Mean December, January and February daily minimum temperature, 2014-2023, degrees F"
+fema_all,"FEMA disaster and emergency declarations naming the county, 2014-2023, excluding Biological (COVID-19)"
+fema_severe_storm,"FEMA declarations naming the county with incident type Severe Storm and Coastal Storm, 2014-2023"
+fema_flood,"FEMA declarations naming the county with incident type Flood, 2014-2023"
+fema_hurricane,"FEMA declarations naming the county with incident type Hurricane, Typhoon and Tropical Storm, 2014-2023"
+fema_fire,"FEMA declarations naming the county with incident type Fire, 2014-2023"
+fema_winter,"FEMA declarations naming the county with incident type Winter Storm, Snowstorm, Severe Ice Storm and Freezing, 2014-2023"
+fema_tornado,"FEMA declarations naming the county with incident type Tornado, 2014-2023"
+pc_precip_pct,Precipitation 2023-08 to 2024-07 as percent above (+) or below (-) the mean 12-month total for 2018-08 to 2023-07 (nClimDiv); matches WxPerc_RainFlood
+pc_flood_days_more,Flood event-days 2023-08 to 2024-07 minus the mean per 12 months for 2018-08 to 2023-07 (Storm Events); matches WxPerc_RainFlood
+pc_tmax_warmer_f,"Mean daily maximum temperature 2023-08 to 2024-07 minus 2018-08 to 2023-07, degrees F (nClimDiv); matches WxPerc_HotHeat"
+pc_heat_days_more,Heat event-days 2023-08 to 2024-07 minus the mean per 12 months for 2018-08 to 2023-07 (Storm Events); matches WxPerc_HotHeat
+pc_winter_colder_f,"December-February mean daily minimum in 2018-08 to 2023-07 minus the winter in 2023-08 to 2024-07, degrees F; positive means the recent winter was colder; matches WxPerc_ColdWinter"
+pc_coldwinter_days_more,Cold and winter storm event-days 2023-08 to 2024-07 minus the mean per 12 months for 2018-08 to 2023-07 (Storm Events); matches WxPerc_ColdWinter
+pc_drought_days_more,Drought event-days 2023-08 to 2024-07 minus the mean per 12 months for 2018-08 to 2023-07 (Storm Events); matches WxPerc_Droughts
+pc_drought_area_more,"Mean weekly percent of county area in D1 or worse drought, 2023-08 to 2024-07 minus 2018-08 to 2023-07 (US Drought Monitor); matches WxPerc_Droughts"
