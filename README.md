@@ -9,7 +9,7 @@ The survey file is read by the browser tab and never leaves the computer. No sur
 ## Workflow in the tool
 
 1. **Load the survey.** Drag in a CSV with one row per respondent. Codes such as 98 or 99 (refused, don't know) can be listed so they are treated as missing. Blank cells, `NA`, `.` and SPSS's `#NULL!` are always missing.
-2. **Place respondents in counties.** Choose latitude and longitude columns, a ZIP code column, or a county FIPS column. Coordinates are placed in the county polygon that contains them; points just off a county edge (usually coastline, within about 10 km) go to the nearest county and are counted. ZIP codes are matched through `data/zip_county.csv`. An optional state column is checked against each placement, and a large group of respondents sharing one exact coordinate pair is flagged, since IP geolocation services return a fixed default point when they cannot locate a user.
+2. **Place respondents in counties.** Choose a ZIP code column or a county FIPS column. ZIP codes are matched through `data/zip_county.csv`, which ships with the repo. An optional state column is checked against each placement. Respondent locations are only ever used at the county level; the tool has no option to place people by coordinates.
 3. **County weather record.** `data/county_weather.csv` loads automatically. Any CSV with a `fips` column and numeric county variables can be loaded in its place.
 4. **Fit the respondent model.** Choose the outcome and predictors. Each predictor is entered either as a number (one slope) or as a category (one coefficient per answer, compared with the most common answer). Survey weights are optional.
 
@@ -42,13 +42,12 @@ The SPEER energy items run in different directions. `NRG_Solar`, `NRG_Wind` and 
 Both scripts use only the Python standard library.
 
 ```
-python scripts/build_zip_county.py
 python scripts/build_county_weather.py                  # 2014-2023 by default
 python scripts/build_county_weather.py --start 2019 --end 2023
 python scripts/build_county_weather.py --perc-end 2024-07 --perc-base-years 3
 ```
 
-`build_zip_county.py` reads the Census 2020 ZCTA-to-county relationship file and writes `data/zip_county.csv`. Each ZCTA is assigned to the county holding the largest share of its land area. ZCTAs approximate ZIP codes, and PO box and single-business ZIPs have no ZCTA, so those respondents are reported as unmatched.
+`data/zip_county.csv` is already in the repo; `build_zip_county.py` rebuilds it (it needs `pip install pyreadr`). It combines the Census 2020 ZCTA-to-county relationship, the Census 2010 relationship file's population counts for each ZCTA-county piece, and the John Snow, Inc. ZIP-to-ZCTA crosswalk, using public copies of these files in the zctaCrosswalk (MarketBridge) and zcta (jjchern) repositories on GitHub. Each ZIP code is assigned to one county: a ZCTA inside one county goes to that county, and a ZCTA split between counties goes to the county holding the largest share of its 2010 population. PO box and single-business ZIP codes, which have no ZCTA, are assigned through the ZCTA that contains them. The file covers 41,063 ZIP codes. About 10,000 ZCTAs touch more than one county, though in most of them nearly all residents are in one; the tool reports how many respondents live in ZIPs where the assigned county holds less than 90% of the population.
 
 `build_county_weather.py` writes `data/county_weather.csv` and `data/county_weather_dictionary.csv`, whose descriptions appear in the tool. Downloads are cached in `scripts/cache/`. The variables are:
 
@@ -89,7 +88,7 @@ Some properties of these sources that bear on interpretation:
 ```
 index.html, css/, js/          the tool (js/stats.js holds the regression and Moran's I code)
 data/counties-albers-10m.json  county outlines from us-atlas 3.0.1
-data/zip_county.csv            built by scripts/build_zip_county.py
+data/zip_county.csv            ZIP code to county lookup (rebuilt by scripts/build_zip_county.py)
 data/county_weather*.csv       built by scripts/build_county_weather.py
 vendor/                        d3 7.9.0, topojson-client 3.1.0, Papa Parse 5.7.0, with licenses
 ```

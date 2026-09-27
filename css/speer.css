@@ -106,7 +106,6 @@ select, input[type=text], input[type=search] {
 .iv-row .type[data-kind=category] { color: var(--storm); border-color: var(--storm); }
 .checks label { display: block; font-size: 13px; color: var(--ink); }
 .check-line { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; font-size: 13px; }
-.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .hint { margin: 6px 0 0; font-size: 12px; color: var(--slate); }
 
 button {

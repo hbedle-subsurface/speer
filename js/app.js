@@ -89,14 +89,10 @@
     $('step-place').removeAttribute('data-locked');
     $('step-model').removeAttribute('data-locked');
     const find = re => S.cols.find(c => re.test(c));
-    const lat = find(/^lat(itude)?$/i) || find(/latitude/i), lon = find(/^(lon|lng|long|longitude)$/i) || find(/longitude/i);
-    const zip = find(/zip/i), fips = find(/fips|county/i);
-    fillSelect($('lat-col'), S.cols, { none: 'Choose', pick: lat });
-    fillSelect($('lon-col'), S.cols, { none: 'Choose', pick: lon });
+    const zip = find(/zip|postal/i) || find(/^Q13$/i), fips = find(/fips|county/i);
     fillSelect($('loc-col'), S.cols, { none: 'Choose a column', pick: zip || fips });
     fillSelect($('state-col'), S.cols, { none: 'None', pick: find(/^state$/i) });
-    const kind = (lat && lon) ? 'latlon' : zip ? 'zip' : fips ? 'fips' : 'latlon';
-    document.querySelector(`input[name=loc-kind][value=${kind}]`).checked = true;
+    document.querySelector(`input[name=loc-kind][value=${!zip && fips ? 'fips' : 'zip'}]`).checked = true;
     fillSelect($('dv-col'), S.cols, { none: 'Choose a column' });
     fillSelect($('wt-col'), S.cols, { none: 'None (unweighted)', pick: S.cols.find(c => /^weight|wt$|_wt|weight_/i.test(c)) });
     S.ivOn.clear(); S.ivKind = {};
@@ -113,7 +109,7 @@
   function renderIvList() {
     const f = $('iv-filter').value.toLowerCase();
     const dv = $('dv-col').value, wt = $('wt-col').value;
-    const locCols = new Set([$('loc-col').value, $('lat-col').value, $('lon-col').value].filter(Boolean));
+    const locCols = new Set([$('loc-col').value].filter(Boolean));
     $('iv-list').innerHTML = S.cols
       .filter(c => c !== dv && c !== wt && !locCols.has(c) && c.toLowerCase().includes(f))
       .map(c => `<div class="iv-row"><input type="checkbox" data-col="${esc(c)}" ${S.ivOn.has(c) ? 'checked' : ''} aria-label="Use ${esc(c)}">
@@ -155,7 +151,7 @@
       if (!/^zip/i.test(txt.trim())) throw new Error('missing');
       const m = new Map();
       Papa.parse(txt, { header: true, skipEmptyLines: true }).data.forEach(r =>
-        m.set(String(r.zip).padStart(5, '0'), { fips: String(r.county_fips).padStart(5, '0'), share: +r.land_share, nCounties: +r.n_counties }));
+        m.set(String(r.zip).padStart(5, '0'), { fips: String(r.county_fips).padStart(5, '0'), share: r.pop_share === '' ? NaN : +r.pop_share, nCounties: +r.n_counties }));
       S.zipCounty = m;
     } catch (e) { S.zipCounty = false; }
     return S.zipCounty;
@@ -176,34 +172,18 @@
 
   async function placeRespondents() {
     const kind = locKind(), out = $('place-status');
-    $('loc-one').hidden = kind === 'latlon'; $('loc-two').hidden = kind !== 'latlon';
     S.rowFips = new Array(S.rows.length).fill(null);
     if (!S.rows.length) return;
-    const col = $('loc-col').value, latC = $('lat-col').value, lonC = $('lon-col').value;
-    if (kind === 'latlon' ? !(latC && lonC) : !col) { out.textContent = 'Choose the column(s) that hold each respondent\'s location.'; return; }
+    const col = $('loc-col').value;
+    if (!col) {
+      out.textContent = kind === 'zip' ? 'No ZIP code column was found. Choose the column that holds each respondent\'s ZIP code.' : 'Choose the column that holds each respondent\'s county FIPS code.';
+      return;
+    }
     let matched = 0, bad = 0, unknown = 0, note = '';
-    if (kind === 'latlon') {
-      if (!countyIndex) await mapReady;
-      let near = 0;
-      const pairs = new Map();
-      S.rows.forEach((r, i) => {
-        const la = num(r[latC]), lo = num(r[lonC]);
-        if (!isFinite(la) || !isFinite(lo) || String(r[latC]).trim() === '') { bad++; return; }
-        const key = `${la},${lo}`; pairs.set(key, (pairs.get(key) || 0) + 1);
-        const hit = countyAt(la, lo);
-        if (!hit) { unknown++; return; }
-        S.rowFips[i] = hit.fips; matched++;
-        if (hit.near) near++;
-      });
-      const [topKey, topN] = [...pairs.entries()].sort((x, y) => y[1] - x[1])[0] || ['', 0];
-      note = (unknown ? ` ${unknown} points fall outside the US county map.` : '') +
-        (near ? ` ${near} points just off a county edge (usually coastline) were assigned to the nearest county.` : '') +
-        ` ${pairs.size.toLocaleString()} distinct coordinate pairs.` +
-        (topN > Math.max(5, 0.01 * matched) ? ` <span class="warn">${topN} respondents share one location (${esc(topKey)}); a single repeated point can be a geolocation default.</span>` : '');
-    } else if (kind === 'zip') {
+    if (kind === 'zip') {
       const zc = await loadZipCounty();
       if (!zc) {
-        out.innerHTML = '<span class="err">data/zip_county.csv was not found. Build it with scripts/build_zip_county.py (see the README), or use another location type.</span>';
+        out.innerHTML = '<span class="err">data/zip_county.csv could not be loaded. It ships with the repo; check that the data folder was uploaded.</span>';
         return;
       }
       let split = 0;
@@ -213,10 +193,10 @@
         const hit = zc.get(z);
         if (!hit) { unknown++; return; }
         S.rowFips[i] = hit.fips; matched++;
-        if (hit.share < 0.9) split++;
+        if (hit.nCounties > 1 && !(hit.share >= 0.9)) split++;
       });
-      note = (unknown ? ` ${unknown} ZIPs have no Census ZCTA (often PO box or business ZIPs).` : '') +
-        (split ? ` <span class="warn">${split} live in ZIPs that cross a county line; each is assigned to the county holding most of the ZIP's land area.</span>` : '');
+      note = (unknown ? ` ${unknown} ZIP codes are not in the lookup (retired ZIPs, or outside the 50 states and DC).` : '') +
+        (split ? ` <span class="warn">${split} live in ZIPs split between counties with less than 90% of the ZIP's population in the assigned county.</span>` : '');
     } else {
       S.rows.forEach((r, i) => {
         const f = cleanFips(r[col]);
@@ -226,9 +206,10 @@
       });
       note = unknown ? ` ${unknown} codes are not on the county map.` : '';
     }
+    if (bad > 0.5 * S.rows.length) note += ` <span class="err">Most values in ${esc(col)} do not look like ${kind === 'zip' ? 'ZIP codes' : 'county FIPS codes'}. Check the column choice.</span>`;
     // optional cross-check against a reported state
     const stC = $('state-col').value;
-    if (stC) {
+    if (stC && matched) {
       let mism = 0;
       S.rows.forEach((r, i) => {
         const f = S.rowFips[i]; if (!f) return;
@@ -244,47 +225,13 @@
       (bad ? ` ${bad} blank or malformed.` : '') + note;
     if (S.fit) aggregateCounties();
   }
-  ['loc-col', 'lat-col', 'lon-col', 'state-col'].forEach(id => $(id).addEventListener('change', () => { renderIvList(); placeRespondents(); }));
+  ['loc-col', 'state-col'].forEach(id => $(id).addEventListener('change', () => { renderIvList(); placeRespondents(); }));
   document.querySelectorAll('input[name=loc-kind]').forEach(r => r.addEventListener('change', placeRespondents));
 
   const STATE_ABBR = { '01': 'AL', '02': 'AK', '04': 'AZ', '05': 'AR', '06': 'CA', '08': 'CO', '09': 'CT', '10': 'DE', '11': 'DC', '12': 'FL', '13': 'GA', '15': 'HI', '16': 'ID', '17': 'IL', '18': 'IN', '19': 'IA', '20': 'KS', '21': 'KY', '22': 'LA', '23': 'ME', '24': 'MD', '25': 'MA', '26': 'MI', '27': 'MN', '28': 'MS', '29': 'MO', '30': 'MT', '31': 'NE', '32': 'NV', '33': 'NH', '34': 'NJ', '35': 'NM', '36': 'NY', '37': 'NC', '38': 'ND', '39': 'OH', '40': 'OK', '41': 'OR', '42': 'PA', '44': 'RI', '45': 'SC', '46': 'SD', '47': 'TN', '48': 'TX', '49': 'UT', '50': 'VT', '51': 'VA', '53': 'WA', '54': 'WV', '55': 'WI', '56': 'WY' };
 
-  // point-in-county on the pre-projected us-atlas outlines
-  // (us-atlas albers files use geoAlbersUsa().scale(1300).translate([487.5, 305]))
+  // us-atlas albers files use this projection; used to find county centroids for smoothing
   const PROJ = d3.geoAlbersUsa().scale(1300).translate([487.5, 305]);
-  let countyIndex = null;
-  function buildCountyIndex(features) {
-    countyIndex = features.map(f => {
-      const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      polys.forEach(p => p[0].forEach(([x, y]) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }));
-      return { fips: f.id, polys, bb: [x0, y0, x1, y1] };
-    });
-  }
-  function inside(c, pt) {
-    return c.polys.some(p => d3.polygonContains(p[0], pt) && !p.slice(1).some(h => d3.polygonContains(h, pt)));
-  }
-  function segDist(p, a, b) {
-    const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy;
-    const t = L ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L)) : 0;
-    return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
-  }
-  function countyAt(lat, lon) {
-    const pt = PROJ([lon, lat]);
-    if (!pt) return null;
-    const TOL = 2.5; // map units, about 10 km
-    let best = null, bestD = TOL;
-    for (const c of countyIndex) {
-      const [x0, y0, x1, y1] = c.bb;
-      if (pt[0] < x0 - TOL || pt[0] > x1 + TOL || pt[1] < y0 - TOL || pt[1] > y1 + TOL) continue;
-      if (inside(c, pt)) return { fips: c.fips, near: false };
-      for (const p of c.polys) for (const ring of p) for (let k = 1; k < ring.length; k++) {
-        const d = segDist(pt, ring[k - 1], ring[k]);
-        if (d < bestD) { bestD = d; best = c.fips; }
-      }
-    }
-    return best ? { fips: best, near: true } : null;
-  }
 
   // ---------------- weather table ----------------
   async function loadDefaultWeather() {
@@ -465,7 +412,6 @@
     geoms.forEach(g => S.countyName.set(g.id, g.properties.name));
     topojson.neighbors(geoms).forEach((nb, i) => S.neighbors.set(geoms[i].id, nb.map(j => geoms[j].id)));
     const feats = topojson.feature(S.topo, S.topo.objects.counties).features;
-    buildCountyIndex(feats);
     const pat = svg.append('defs').append('pattern').attr('id', 'nodata').attr('patternUnits', 'userSpaceOnUse')
       .attr('width', 5).attr('height', 5).attr('patternTransform', 'rotate(45)');
     pat.append('rect').attr('width', 5).attr('height', 5).attr('fill', '#EEF0F1');

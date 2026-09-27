@@ -36,25 +36,12 @@
     <section class="step" id="step-place" data-locked>
       <h2><span class="step-num">2</span> Place respondents in counties</h2>
       <div class="seg" role="radiogroup" aria-label="Location column type">
-        <label><input type="radio" name="loc-kind" value="latlon" checked> Lat / long</label>
-        <label><input type="radio" name="loc-kind" value="zip"> ZIP code</label>
+        <label><input type="radio" name="loc-kind" value="zip" checked> ZIP code</label>
         <label><input type="radio" name="loc-kind" value="fips"> County FIPS</label>
       </div>
-      <div id="loc-one">
-        <label class="field">Column
-          <select id="loc-col"></select>
-        </label>
-      </div>
-      <div id="loc-two">
-        <div class="pair">
-          <label class="field">Latitude
-            <select id="lat-col"></select>
-          </label>
-          <label class="field">Longitude
-            <select id="lon-col"></select>
-          </label>
-        </div>
-      </div>
+      <label class="field">Column
+        <select id="loc-col"></select>
+      </label>
       <label class="field">State column, to cross-check (optional)
         <select id="state-col"></select>
       </label>
@@ -163,7 +150,7 @@
 </main>
 
 <footer class="foot">
-  <p>County outlines: us-atlas (Census cartographic boundaries). ZIP to county: Census 2020 ZCTA–county relationship file. Weather: NOAA Storm Events, NOAA nClimDiv, OpenFEMA. See the README for how the county tables are built.</p>
+  <p>County outlines: us-atlas (Census cartographic boundaries). ZIP to county: Census 2020 and 2010 ZCTA–county relationship files and the John Snow, Inc. ZIP–ZCTA crosswalk. Weather: NOAA Storm Events, NOAA nClimDiv, OpenFEMA. See the README for how the county tables are built.</p>
   <p>Heather Bedle, University of Oklahoma. CC BY-SA 4.0.</p>
 </footer>
 
