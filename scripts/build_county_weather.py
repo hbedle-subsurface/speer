@@ -1,5 +1,5 @@
 """Build data/county_weather.csv (and county_weather_dictionary.csv)
-for a window of years, default 2015-2024.
+for a window of years, default 2014-2023.
 
 Three public sources, each optional:
 
@@ -13,8 +13,8 @@ Three public sources, each optional:
 Uses only the Python standard library.
 
 Usage:
-    python scripts/build_county_weather.py                  # all sources, 2015-2024
-    python scripts/build_county_weather.py --start 2020 --end 2024
+    python scripts/build_county_weather.py                  # all sources, 2014-2023
+    python scripts/build_county_weather.py --start 2019 --end 2023
     python scripts/build_county_weather.py --sources climdiv fema
 
 Downloads are cached in scripts/cache/ so reruns are quick.
@@ -311,8 +311,8 @@ def fema(start, end):
 # ---------------- main ----------------
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--start", type=int, default=2015)
-    ap.add_argument("--end", type=int, default=2024)
+    ap.add_argument("--start", type=int, default=2014)
+    ap.add_argument("--end", type=int, default=2023)
     ap.add_argument("--sources", nargs="+", default=["storm", "climdiv", "fema"], choices=["storm", "climdiv", "fema"])
     ap.add_argument("--zone-file", help="local NWS zone-county correlation file (bpDDmmYY.dbx)")
     ap.add_argument("--out-dir", default=OUT_DIR)

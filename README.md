@@ -2,7 +2,7 @@
 
 Speer is a browser tool for survey data with respondent locations. It fits a regression of a survey answer on respondent characteristics, averages the residuals by US county, maps them, and compares the county residuals with each county's weather and disaster record.
 
-It was built for work on energy preferences and acceptance (solar, wind and other sources) in a survey administered in 2025, with socioeconomic predictors at the respondent level and weather exposure over the preceding ten years (2015–2024) at the county level.
+It was built for work on energy preferences and acceptance (solar, wind and other sources) in the SPEER survey, collected in summer 2024, with socioeconomic predictors at the respondent level and weather exposure over the preceding ten years (2014–2023) at the county level.
 
 The survey file is read by the browser tab and never leaves the computer. No survey data should be committed to this repository.
 
@@ -37,8 +37,8 @@ Both scripts use only the Python standard library.
 
 ```
 python scripts/build_zip_county.py
-python scripts/build_county_weather.py                  # 2015-2024 by default
-python scripts/build_county_weather.py --start 2020 --end 2024
+python scripts/build_county_weather.py                  # 2014-2023 by default
+python scripts/build_county_weather.py --start 2019 --end 2023
 ```
 
 `build_zip_county.py` reads the Census 2020 ZCTA-to-county relationship file and writes `data/zip_county.csv`. Each ZCTA is assigned to the county holding the largest share of its land area. ZCTAs approximate ZIP codes, and PO box and single-business ZIPs have no ZCTA, so those respondents are reported as unmatched.
