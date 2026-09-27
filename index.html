@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Speer: survey regression residuals by county</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,600;0,800;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/speer.css">
+</head>
+<body>
+
+<header class="masthead">
+  <h1>Speer</h1>
+  <p>Regress survey answers on respondent characteristics, map what the model leaves unexplained by county, and compare it with each county's weather record.</p>
+  <p class="privacy">Your survey file is read in this browser tab only. Nothing is uploaded.</p>
+</header>
+
+<main class="layout">
+
+  <aside class="steps" aria-label="Workflow">
+
+    <section class="step" id="step-load">
+      <h2><span class="step-num">1</span> Load the survey</h2>
+      <label class="drop" id="drop-survey" tabindex="0">
+        <input type="file" id="file-survey" accept=".csv,text/csv" hidden>
+        <span class="drop-main">Drop a CSV here or choose a file</span>
+        <span class="drop-sub" id="survey-status">No file loaded</span>
+      </label>
+      <label class="field">Codes to treat as missing
+        <input type="text" id="missing-codes" placeholder="e.g. 98, 99, Refused">
+      </label>
+    </section>
+
+    <section class="step" id="step-place" data-locked>
+      <h2><span class="step-num">2</span> Place respondents in counties</h2>
+      <div class="seg" role="radiogroup" aria-label="Location column type">
+        <label><input type="radio" name="loc-kind" value="zip" checked> ZIP code</label>
+        <label><input type="radio" name="loc-kind" value="fips"> County FIPS</label>
+      </div>
+      <label class="field">Column
+        <select id="loc-col"></select>
+      </label>
+      <p class="status" id="place-status"></p>
+    </section>
+
+    <section class="step" id="step-weather">
+      <h2><span class="step-num">3</span> County weather record</h2>
+      <p class="status" id="weather-status">Looking for data/county_weather.csv…</p>
+      <label class="drop small" id="drop-weather" tabindex="0">
+        <input type="file" id="file-weather" accept=".csv,text/csv" hidden>
+        <span class="drop-main">Load a different county table</span>
+      </label>
+      <div class="field">
+        <span class="field-label">Variables</span>
+        <div class="wx-list" id="wx-list"></div>
+      </div>
+    </section>
+
+    <section class="step" id="step-model" data-locked>
+      <h2><span class="step-num">4</span> Fit the respondent model</h2>
+      <label class="field">Outcome
+        <select id="dv-col"></select>
+      </label>
+      <div class="seg" role="radiogroup" aria-label="Outcome type">
+        <label><input type="radio" name="dv-kind" value="linear" checked> Scale (linear)</label>
+        <label><input type="radio" name="dv-kind" value="logit"> Yes/no (logistic)</label>
+      </div>
+      <fieldset class="field" id="dv-ones" hidden>
+        <legend>Answers counted as yes</legend>
+        <div class="checks" id="dv-ones-list"></div>
+      </fieldset>
+      <div class="field">
+        <span class="field-label">Predictors</span>
+        <input type="search" id="iv-filter" placeholder="Filter columns" aria-label="Filter predictor columns">
+        <div class="iv-list" id="iv-list"></div>
+        <p class="hint">Number: entered as one slope. Category: one coefficient per answer, compared with the most common answer.</p>
+      </div>
+      <label class="field">Survey weight
+        <select id="wt-col"></select>
+      </label>
+      <label class="field">Standard errors
+        <select id="se-kind">
+          <option value="robust">Robust (HC1)</option>
+          <option value="cluster">Clustered by county</option>
+        </select>
+      </label>
+      <label class="check-line"><input type="checkbox" id="add-weather" disabled> Add selected weather variables as predictors</label>
+      <button type="button" class="primary" id="fit">Fit model</button>
+      <p class="status" id="model-status"></p>
+    </section>
+
+  </aside>
+
+  <section class="results" aria-label="Results">
+
+    <figure class="map-card">
+      <div class="map-controls">
+        <label>Show
+          <select id="map-layer"><option value="resid">Mean residual</option><option value="n">Respondents</option></select>
+        </label>
+        <label>Minimum respondents per county <output id="minn-out">5</output>
+          <input type="range" id="minn" min="1" max="30" step="1" value="5">
+        </label>
+        <label id="range-wrap">Color range ± <output id="range-out">1.0</output>
+          <input type="range" id="range" min="0.05" max="3" step="0.05" value="1">
+        </label>
+      </div>
+      <div class="map-wrap">
+        <svg id="map" viewBox="0 0 975 610" role="img" aria-label="County map"></svg>
+        <div class="tip" id="tip" hidden></div>
+        <div class="map-empty" id="map-empty">Fit a model to map residuals by county.</div>
+      </div>
+      <figcaption>
+        <svg id="legend" width="440" height="44" aria-hidden="true"></svg>
+        <div class="moran">
+          <button type="button" id="run-moran" disabled>Test for clustering (Moran's I)</button>
+          <span id="moran-out"></span>
+        </div>
+        <button type="button" id="export-county" disabled>Download county table</button>
+      </figcaption>
+    </figure>
+
+    <div class="panels">
+      <section class="panel" id="panel-model">
+        <h3>Respondent model</h3>
+        <div id="model-summary" class="summary"></div>
+        <div id="coef-table"></div>
+      </section>
+
+      <section class="panel" id="panel-county">
+        <h3>County residuals and weather</h3>
+        <label class="field inline">Plot against
+          <select id="scatter-x"></select>
+        </label>
+        <svg id="scatter" viewBox="0 0 520 340" role="img" aria-label="County mean residual against a weather variable"></svg>
+        <div id="county-summary" class="summary"></div>
+        <div id="county-table"></div>
+      </section>
+    </div>
+
+  </section>
+</main>
+
+<footer class="foot">
+  <p>County outlines: us-atlas (Census cartographic boundaries). ZIP to county: Census 2020 ZCTA–county relationship file. Weather: NOAA Storm Events, NOAA nClimDiv, OpenFEMA. See the README for how the county tables are built.</p>
+  <p>Heather Bedle, University of Oklahoma. CC BY-SA 4.0.</p>
+</footer>
+
+<script src="vendor/d3.min.js"></script>
+<script src="vendor/topojson-client.min.js"></script>
+<script src="vendor/papaparse.min.js"></script>
+<script src="js/stats.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+Speer
+Copyright (c) 2026 Heather Bedle, University of Oklahoma
+
+This work is licensed under the Creative Commons Attribution-ShareAlike 4.0
+International License (CC BY-SA 4.0). To view a copy of this license, visit
+https://creativecommons.org/licenses/by-sa/4.0/legalcode
+
+Third-party components in vendor/ and data/counties-albers-10m.json keep
+their own licenses (ISC for d3, topojson-client and us-atlas; MIT for
+Papa Parse); see the license files in vendor/.
