@@ -343,7 +343,7 @@
       $('toast').hidden = true;
     } catch (e) {
       $('toast').hidden = true;
-      $('weather-status').innerHTML = 'No county weather table in data/ yet. Build it with scripts/build_county_weather.py, or load any CSV with a <b>fips</b> column plus numeric county variables.';
+      $('weather-status').innerHTML = 'No county weather table in data/ yet. It is built on GitHub: in the repo, open the <b>Actions</b> tab, choose <b>Build county weather table</b> and press <b>Run workflow</b>. When the run finishes, reload this page. Any CSV with a <b>fips</b> column plus numeric county variables can also be loaded here.';
     }
   }
 

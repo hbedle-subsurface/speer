@@ -131,8 +131,9 @@ def zone_to_counties(zone_file):
         page = listing(ZONE_PAGE)
         names = re.findall(r"bp\d{2}[a-z]{2}\d{2}\.dbx", page)
         if not names:
-            raise SystemExit("Could not find the NWS zone-county correlation file. Download the "
-                             ".dbx file from https://www.weather.gov/gis/ZoneCounty and pass --zone-file.")
+            print("  WARNING: could not find the NWS zone-county correlation file; zone-coded events "
+                  "(most heat and cold reports) are left out. Pass --zone-file to include them.")
+            return {}
         text = fetch(ZONE_BASE + names[0], names[0])
     m = defaultdict(set)
     for line in text.splitlines():
@@ -156,7 +157,11 @@ def storm_year(year, zone_file):
     if year in _STORM_CACHE:
         return _STORM_CACHE[year]
     if _ZONES is None:
-        _ZONES = zone_to_counties(zone_file)
+        try:
+            _ZONES = zone_to_counties(zone_file)
+        except Exception as e:
+            print(f"  WARNING: zone-county file failed ({e}); zone-coded events are left out")
+            _ZONES = {}
     idx = listing(STORM_DIR)
     files = sorted(re.findall(rf"StormEvents_details-ftp_v1\.0_d{year}_c\d{{8}}\.csv\.gz", idx))
     if not files:
@@ -458,15 +463,22 @@ def main():
     ap.add_argument("--out-dir", default=OUT_DIR)
     args = ap.parse_args()
 
-    tables, desc = [], {}
-    if "storm" in args.sources:
-        t, d = storm_events(args.start, args.end, args.zone_file); tables.append(t); desc.update(d)
-    if "climdiv" in args.sources:
-        t, d = climdiv(args.start, args.end); tables.append(t); desc.update(d)
-    if "fema" in args.sources:
-        t, d = fema(args.start, args.end); tables.append(t); desc.update(d)
-    if "perception" in args.sources:
-        t, d = perception(args.perc_end, args.perc_base_years, args.zone_file); tables.append(t); desc.update(d)
+    tables, desc, failed = [], {}, []
+    steps = [("storm", lambda: storm_events(args.start, args.end, args.zone_file)),
+             ("climdiv", lambda: climdiv(args.start, args.end)),
+             ("fema", lambda: fema(args.start, args.end)),
+             ("perception", lambda: perception(args.perc_end, args.perc_base_years, args.zone_file))]
+    for name, run in steps:
+        if name not in args.sources:
+            continue
+        try:
+            t, d = run()
+            tables.append(t); desc.update(d)
+        except Exception as e:  # one source failing should not lose the others
+            print(f"  WARNING: {name} failed: {e}")
+            failed.append(name)
+    if not tables:
+        raise SystemExit("Every source failed; nothing was written.")
 
     counties = sorted(set().union(*[t.keys() for t in tables]))
     cols = list(desc.keys())
@@ -488,6 +500,8 @@ def main():
         w.writerow(["variable", "description"])
         w.writerows(desc.items())
     print(f"Wrote {len(counties):,} counties and {len(cols)} variables to {out}")
+    if failed:
+        print(f"Sources that failed and are missing from the table: {', '.join(failed)}")
 
 
 if __name__ == "__main__":

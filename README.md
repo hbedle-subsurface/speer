@@ -98,6 +98,14 @@ The regression check covers weighted linear models (coefficients, R², classical
 
 ## Building the county tables
 
+### On GitHub
+
+The repo includes a GitHub Actions workflow that builds the county weather table on GitHub's servers and commits it to `data/`. In the repo on github.com, open the **Actions** tab, choose **Build county weather table**, press **Run workflow**, adjust the years if needed, and run it. The downloads from NOAA, FEMA and the Drought Monitor take a while. When the run finishes, `data/county_weather.csv` and `data/county_weather_dictionary.csv` are in the repo and the tool loads them. If a source is unavailable during the run, the table is written without it and the run log lists what is missing.
+
+If the run fails at the commit step, the repository's workflow permissions are read-only; they are set under Settings, Actions, General, Workflow permissions ("Read and write permissions").
+
+### On a computer
+
 Both scripts use only the Python standard library.
 
 ```
