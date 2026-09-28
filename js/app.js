@@ -209,6 +209,10 @@
     $('preset').innerHTML = '<option value="">Choose predictors by hand</option>' +
       ps.map((p, i) => `<option value="${i}">${esc(p.name)}${p.saved ? ' (saved in this browser)' : ''}</option>`).join('');
     if (pick != null) $('preset').value = pick;
+    const keepB = $('baseline').value;
+    $('baseline').innerHTML = '<option value="">None</option>' + ps.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join('');
+    const want = keepB !== '' ? keepB : String(ps.findIndex(p => p.name === window.SPEER_BASELINE));
+    if (want !== '-1' && ps[+want]) $('baseline').value = want;
   }
   function applyPreset() {
     const p = allPresets()[+$('preset').value];
@@ -227,10 +231,13 @@
       (missing.length ? ` <span class="warn">Not in this file: ${missing.map(esc).join(', ')}.</span>` : '');
   }
   function autoPreset() {
-    const firstFit = allPresets().findIndex(p => p.predictors.length && p.predictors.filter(q => S.cols.includes(q.col)).length >= p.predictors.length * 0.75);
+    const ps = allPresets(), def = ps.findIndex(p => p.name === window.SPEER_DEFAULT && p.predictors.filter(q => S.cols.includes(q.col)).length >= p.predictors.length * 0.75);
+    if (def >= 0) { $('preset').value = String(def); applyPreset(); return; }
+    const firstFit = ps.findIndex(p => p.predictors.length && p.predictors.filter(q => S.cols.includes(q.col)).length >= p.predictors.length * 0.75);
     if (firstFit >= 0) { $('preset').value = String(firstFit); applyPreset(); } else { $('preset').value = ''; $('preset-note').textContent = ''; }
   }
   $('preset').addEventListener('change', applyPreset);
+  $('baseline').addEventListener('change', () => { if (S.fit) compareBaseline(S.fit.set, S.fitDesign, S.fit); });
   $('clear-ivs').addEventListener('click', () => { S.ivOn = new Set(); S.labels = {}; $('preset').value = ''; $('preset-note').textContent = ''; renderIvList(); });
   $('save-preset').addEventListener('click', () => {
     if (!S.ivOn.size) { $('preset-note').textContent = 'Tick some predictors first.'; return; }
@@ -480,6 +487,7 @@
     const D = buildDesign(set, terms); if (D.error) return bail(D.error);
     const res = runModel(set, D); if (res.error) return bail(res.error);
 
+    S.fitDesign = D;
     S.fit = { ...res, names: D.names, X: D.X, idx: D.idx, w: set.wt ? D.w : null, dv: set.dv, kind: set.kind, ivs: set.ivs, useWx: set.useWx,
       cluster: set.seKind === 'cluster', dropped: D.dropped, noCounty: D.noCounty, set,
       residSD: Math.sqrt(res.resid.reduce((s, e) => s + e * e, 0) / res.resid.length) };
@@ -494,11 +502,42 @@
     const rg = $('range'); rg.max = Math.max(3, r0 * 3); rg.step = set.kind === 'logit' ? 0.01 : 0.05; rg.value = r0;
     $('range-out').textContent = fmt(r0, 2);
     renderCoefTable();
+    compareBaseline(set, D, res);
     if ($('tab-model').hidden) showTab('model');
     if (document.querySelector('details.diag').open) renderVif();
     busy('Averaging residuals by county and smoothing the map…'); await tick();
     if ($('map-layer').value === 'n') $('map-layer').value = 'smooth';
     aggregateCounties();
+  }
+
+  // nested comparison with a baseline predictor set, on the same respondents
+  function compareBaseline(set, D, res) {
+    const box = $('compare'), bi = $('baseline').value;
+    if (bi === '') { box.innerHTML = ''; return; }
+    const bp = allPresets()[+bi];
+    const bcols = bp.predictors.map(q => q.col).filter(c => S.cols.includes(c));
+    const missing = bcols.filter(c => !set.ivs.includes(c));
+    if (missing.length) { box.innerHTML = `<b>Baseline (${esc(bp.name)}):</b> not compared, because the current predictors leave out ${missing.length} of its columns (${missing.slice(0, 6).map(esc).join(', ')}${missing.length > 6 ? ', …' : ''}), so the models are not nested.`; return; }
+    const added = D.terms.map((t, j) => ({ t, j })).filter(({ t, j }) => j > 0 && !(t.col && bcols.includes(t.col)));
+    if (!added.length) { box.innerHTML = `<b>Baseline:</b> the current model is the ${esc(bp.name)} set itself.`; return; }
+    // baseline fitted on exactly the rows of the current model
+    const keepIdx = D.names.map((_, j) => j).filter(j => j === 0 || (D.terms[j].col && bcols.includes(D.terms[j].col)));
+    const Xb = D.X.map(r => keepIdx.map(j => r[j]));
+    const rb = (set.kind === 'logit' ? Stats.logit : Stats.ols)(Xb, D.y, set.wt ? D.w : null, { se: set.seKind, clusters: D.cl });
+    if (rb.error) { box.innerHTML = `<b>Baseline:</b> ${esc(rb.error)}`; return; }
+    // Wald test that the added terms are all zero, using the current model's covariance
+    const q = added.length, idx = added.map(a => a.j);
+    const b = idx.map(j => res.beta[j]), Vsub = idx.map(r => idx.map(c => res.V[r][c])), Vi = Stats.invert(Vsub);
+    let txt = '';
+    if (Vi) {
+      const W = b.reduce((s, bi_, r) => s + bi_ * Vi[r].reduce((t, v, c) => t + v * b[c], 0), 0);
+      const d2 = set.kind === 'logit' ? 1e7 : res.df, F = W / q, p = Stats.pF(F, q, d2);
+      txt = ` Joint test of the ${q} added terms: F(${q}, ${set.kind === 'logit' ? '∞' : d2}) = ${fmt(F, 2)}, p ${p < 0.001 ? '< 0.001' : '= ' + fmt(p, 3)} (${seText(res)} covariance).`;
+    }
+    const fitTxt = set.kind === 'logit'
+      ? `McFadden pseudo R² ${fmt(rb.pseudoR2)} for the baseline and ${fmt(res.pseudoR2)} with the added terms (change ${fmt(res.pseudoR2 - rb.pseudoR2)}).`
+      : `R² ${fmt(rb.r2)} for the baseline and ${fmt(res.r2)} with the added terms, a change of <b>${fmt(res.r2 - rb.r2)}</b>.`;
+    box.innerHTML = `<b>Compared with the baseline (${esc(bp.name)}), on the same ${res.n.toLocaleString()} respondents:</b> ${fitTxt}${txt}`;
   }
 
   const SE_TXT = { hc1: 'robust (HC1)', hc3: 'robust (HC3)', classical: 'classical (model-based)' };
@@ -982,6 +1021,9 @@
     window.SPEER_PRESETS = Array.isArray(obj.presets) ? obj.presets : [];
     window.SPEER_LABELS = obj.labels || {};
     window.SPEER_SCALES = obj.scales || {};
+    window.SPEER_DEFAULT = obj.default || null;
+    window.SPEER_BASELINE = obj.baseline || null;
+    $('baseline').value = '';
     proj.name = obj.name || name || 'project settings';
     renderPresetMenu();
     if (S.rows.length && !S.ivOn.size) autoPreset();

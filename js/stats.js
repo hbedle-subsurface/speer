@@ -187,6 +187,12 @@ const Stats = (() => {
     return ibeta(df / (df + t * t), df / 2, 0.5);
   }
 
+  // upper-tail p for an F statistic with d1, d2 degrees of freedom
+  function pF(F, d1, d2) {
+    if (!(F > 0)) return 1;
+    return ibeta(d2 / (d2 + d1 * F), d2 / 2, d1 / 2);
+  }
+
   function erfc(x) {
     const z = Math.abs(x), t = 1 / (1 + 0.5 * z);
     const r = t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 +
@@ -326,7 +332,7 @@ const Stats = (() => {
     return { I: obs, expected: -1 / (n - 1), p: (ge + 1) / (nPerm + 1), n, excluded, nPerm };
   }
 
-  return { ols, logit, moransI, pT, pZ, invert, collinearity, predict, crit95 };
+  return { ols, logit, moransI, pT, pZ, pF, invert, collinearity, predict, crit95 };
 })();
 
 if (typeof module !== 'undefined') module.exports = Stats;

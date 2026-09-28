@@ -105,6 +105,9 @@
         <select id="preset"></select>
       </label>
       <p class="hint" id="preset-note"></p>
+      <label class="field">Compare with a baseline set
+        <select id="baseline"></select>
+      </label>
       <div class="field">
         <span class="field-label">Predictors <button type="button" class="link" id="save-preset">Save this set</button> <button type="button" class="link" id="clear-ivs">Clear</button></span>
         <input type="search" id="iv-filter" placeholder="Filter columns" aria-label="Filter predictor columns">
@@ -210,6 +213,7 @@
         <div>
           <h3>Respondent model</h3>
           <div id="model-summary" class="summary">Fit a model in step 4.</div>
+          <div id="compare" class="summary"></div>
         </div>
       </div>
       <label class="field inline">Chart

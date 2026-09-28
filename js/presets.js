@@ -11,6 +11,8 @@
 //     { "name": "Standard controls + attitudes", "extends": "Standard controls",
 //       "predictors": [ { "col": "trust", "label": "Trust", "kind": "number" } ] }
 //   ],
+//   "default": "Standard controls",       (set applied when a survey loads)
+//   "baseline": "Standard controls",      (set that fitted models are compared with)
 //   "labels": { "age": "Age" },
 //   "scales": { "support_solar": { "low": "very unfavorable", "high": "very favorable" } }
 // }
