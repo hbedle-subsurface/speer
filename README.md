@@ -2,33 +2,49 @@
 
 SPEER is a browser tool for survey data with respondent locations. It fits a regression of a survey answer on respondent characteristics, averages the residuals by US county, maps them, and compares the county residuals with each county's weather and disaster record.
 
-It was built for work on energy preferences and acceptance (solar, wind and other sources) in the 2024 SPEER survey (collected August 16 to October 16, 2024), with socioeconomic predictors at the respondent level and weather exposure over the preceding ten years (2014–2023) at the county level.
+It was built for work on public views of energy (solar, wind and other sources) in a national survey, with socioeconomic predictors at the respondent level and weather exposure over the preceding years at the county level.
 
-The survey file is read by the browser tab and never leaves the computer. No survey data should be committed to this repository.
+The survey file, its codebook and any project settings are read by the browser tab and never leave the computer. None of them belong in this repository: it holds only the tool, public county data and synthetic test data.
 
 ## Workflow in the tool
 
-1. **Load the survey.** Drag in a CSV or Excel file (first sheet) with one row per respondent. A computed column (A minus B, A plus B, A times B, A mean-centered or A standardized) can be added in the browser, for example `NRG_CCdiff` as `NRG_CC` minus `NRG_CCEQ`. Codes such as 98 or 99 (refused, don't know) can be listed so they are treated as missing. Blank cells, `NA`, `.` and SPSS's `#NULL!` are always missing.
+1. **Load the survey.** Drag in a CSV or Excel file (first sheet) with one row per respondent. A computed column (A minus B, A plus B, A times B, A mean-centered or A standardized) can be added in the browser, for example the difference between two related items. Codes such as 98 or 99 (refused, don't know) can be listed so they are treated as missing. Blank cells, `NA`, `.` and SPSS's `#NULL!` are always missing.
 2. **Place respondents in counties.** Choose a ZIP code column or a county FIPS column. ZIP codes are matched through `data/zip_county.csv`, which ships with the repo. An optional state column is checked against each placement. Respondent locations are only ever used at the county level; the tool has no option to place people by coordinates.
 3. **County weather record.** `data/county_weather.csv` loads automatically. Any CSV with a `fips` column and numeric county variables can be loaded in its place.
-4. **Fit the respondent model.** Choose the outcome and predictors. A predictor set fills in a standard list of predictors, with display labels and the survey weight, in one step; the SPEER standard controls load automatically when the file contains them. Sets are defined in `js/presets.js`, which can be edited on GitHub, and any set of ticked predictors can also be saved in the browser (column names only). Results appear as a coefficient table with 95% confidence intervals and a bar chart of t values colored by p-value band, and the table can be downloaded as CSV. Each predictor is entered either as a number (one slope) or as a category (one coefficient per answer, compared with the most common answer). Survey weights are optional.
+4. **Fit the respondent model.** Choose the outcome and predictors. A predictor set fills in a standard list of predictors, with display labels and the survey weight, in one step. Sets come from a project settings file loaded in step 1 (see Project files), and any set of ticked predictors can also be saved in the browser (column names only). A set loads automatically when the survey file contains most of its columns. Results appear as a coefficient table with 95% confidence intervals and a bar chart of t values colored by p-value band, and the table can be downloaded as CSV. Each predictor is entered either as a number (one slope) or as a category (one coefficient per answer, compared with the most common answer). Survey weights are optional.
 
 The map opens on a smoothed residual surface that fills in unsampled counties (see Smoothing below). It can also show the raw weighted mean residual in each county that has at least the chosen number of respondents. The color range is set with a slider and does not rescale when the minimum count changes, so the same color means the same residual throughout a session. The map can also show respondent counts or any weather variable.
 
-Below the map, a short reading of the current view is written from the model and the map settings: what red and blue mean for the chosen outcome (using the SPEER answer labels in `window.SPEER_SCALES` in `js/presets.js`, where they are known), how large the color range is relative to the answer scale, how the smoothing works at the current distance, how many respondents the colored counties draw on, and notes when the settings make the map easy to over-read (a low minimum, a very long or very short smoothing distance). The legend is labeled "lower than predicted" and "higher than predicted", and the Moran's I result is followed by a plain statement of what it means.
+Below the map, a short reading of the current view is written from the model and the map settings: what red and blue mean for the chosen outcome (using the answer labels from the codebook or project settings, where they are loaded), how large the color range is relative to the answer scale, how the smoothing works at the current distance, how many respondents the colored counties draw on, and notes when the settings make the map easy to over-read (a low minimum, a very long or very short smoothing distance). The legend is labeled "lower than predicted" and "higher than predicted", and the Moran's I result is followed by a plain statement of what it means.
 
 A second panel, "Average residual by state or region", plots the unsmoothed weighted mean residual for each state, Census division or Census region with a 95% interval (the standard error of a weighted mean), in the map's colors. Groups below a minimum number of respondents (default 20) are left out and listed. This view shows which parts of the map pattern rest on enough respondents to stand apart from zero.
 
 The lower right panel plots county mean residuals against one weather variable and fits a county-level regression on all ticked weather variables, weighted by the number of respondents in each county.
 
-## SPEER coding notes
+## Project files
 
-The SPEER energy items run in different directions. `NRG_Solar`, `NRG_Wind` and `NRG_Nuclear` are coded 1 = very favorable to 6 = very unfavorable, and `NRG_HC` 1 = strongly agree to 6 = strongly disagree that hydrocarbons should stay in the energy mix. The `_l` versions reverse these (7 minus the answer), so higher values mean more favorable toward solar, wind and nuclear, and more agreement that hydrocarbons should continue. `NRG_CC` (carbon capture research) is already coded 1 = strongly oppose to 6 = strongly favor. A positive county residual means respondents there scored higher on whichever coding is chosen than the model predicts.
+A survey's own details are kept out of this repository and loaded in step 1 from files on the user's computer. There are two kinds, and either or both can be dropped in at once:
+
+- **Codebook (CSV)** with the columns `column, question, block, text, item, options`, one row per data column, options written as `1=Label; 2=Label`. It ties each column to the question as it was asked.
+- **Project settings (JSON)** with predictor sets, display labels for columns, and words for the low and high ends of answer scales. The format is described at the top of `js/presets.js`, which ships empty.
+
+With "Remember in this browser" ticked, the files are kept in that browser's local storage so they reload with the page; "Forget" removes them. They are never sent anywhere. `.gitignore` excludes spreadsheet files, codebook CSVs and project JSON files so they are not committed by accident from a local copy of the repo (uploads through the github.com web page do not check `.gitignore`).
+
+With a codebook loaded:
+
+- **Questions tab.** Every question, searchable and grouped by survey block, with its full wording, answer options and the weighted distribution of answers in the loaded file. From a question, it can be made the outcome, added as a predictor, sent to the group comparison, or added as a SHAP candidate.
+- **Outcome.** The question wording and the answer scale appear under the outcome in step 4 and in the Model tab.
+- **Map reading.** The outcome's question text and the labels of the lowest and highest answers describe what red and blue mean.
+- **Tooltips.** Hovering over a column name in the predictor, group and SHAP lists shows the question.
+- **Group labels.** Choosing a grouping column fills in its answer labels.
+
+Data files are often recoded after export, so a column's codes can differ from the questionnaire's. For each question the tool compares the values in the file with the codebook codes and, where they differ, says so and does not apply the answer labels. Columns with the suffixes `_d`, `_s`, `_r`, `_l` or `_c` that are not in the codebook point back to the question they come from.
 
 ## Analysis tabs
 
 Below the map, the results are arranged in tabs.
 
+- **Questions.** The codebook browser described above.
 - **Model.** The outcome's distribution and summary statistics, the respondent model as a chart of t values or of coefficients with 95% intervals, colored by p-value band, the coefficient table, and collinearity diagnostics (variance inflation factors and the condition number, computed unweighted as in statsmodels).
 - **Interaction.** Adds a moderator, a second variable (optionally mean-centered) and their product to the current model, lists the key terms, and plots the predicted outcome across the second variable for each level of the moderator (each category, 0 and 1 for a dummy, or the mean and ±1 SD for a continuous moderator), with the other predictors held at their weighted means and 95% intervals from the model's covariance matrix. For a logistic model the lines are predicted probabilities.
 - **Group comparison.** The weighted percent of respondents at or above (or at or below) a cut-off on one or more items, by group, as clustered bars on a fixed 0–100% axis. Group labels such as `1=Democrat, 2=Independent, 3=Republican` can be typed in; party labels take blue, gray and red.
@@ -104,7 +120,7 @@ The regression check covers weighted linear models (coefficients, R², classical
 
 ### On GitHub
 
-The repo includes a GitHub Actions workflow that builds the county weather table on GitHub's servers and commits it to `data/`. In the repo on github.com, open the **Actions** tab, choose **Build county weather table**, press **Run workflow**, adjust the years if needed, and run it. The downloads from NOAA, FEMA and the Drought Monitor take a while. When the run finishes, `data/county_weather.csv` and `data/county_weather_dictionary.csv` are in the repo and the tool loads them. If a source is unavailable during the run, the table is written without it and the run log lists what is missing.
+The repo includes a GitHub Actions workflow that builds the county weather table on GitHub's servers and commits it to `data/`. In the repo on github.com, open the **Actions** tab, choose **Build county weather table**, press **Run workflow**, adjust the years if needed (and give the last full month before fieldwork to build the perception-matched variables), and run it. The downloads from NOAA, FEMA and the Drought Monitor take a while. When the run finishes, `data/county_weather.csv` and `data/county_weather_dictionary.csv` are in the repo and the tool loads them. If a source is unavailable during the run, the table is written without it and the run log lists what is missing.
 
 If the run fails at the commit step, the repository's workflow permissions are read-only; they are set under Settings, Actions, General, Workflow permissions ("Read and write permissions").
 
@@ -115,7 +131,7 @@ Both scripts use only the Python standard library.
 ```
 python scripts/build_county_weather.py                  # 2014-2023 by default
 python scripts/build_county_weather.py --start 2019 --end 2023
-python scripts/build_county_weather.py --perc-end 2024-07 --perc-base-years 3
+python scripts/build_county_weather.py --perc-end 2023-12 --perc-base-years 3   # with perception variables (example month)
 ```
 
 `data/zip_county.csv` is already in the repo; `build_zip_county.py` rebuilds it (it needs `pip install pyreadr`). It combines the Census 2020 ZCTA-to-county relationship, the Census 2010 relationship file's population counts for each ZCTA-county piece, and the John Snow, Inc. ZIP-to-ZCTA crosswalk, using public copies of these files in the zctaCrosswalk (MarketBridge) and zcta (jjchern) repositories on GitHub. Each ZIP code is assigned to one county: a ZCTA inside one county goes to that county, and a ZCTA split between counties goes to the county holding the largest share of its 2010 population. PO box and single-business ZIP codes, which have no ZCTA, are assigned through the ZCTA that contains them. The file covers 41,063 ZIP codes. About 10,000 ZCTAs touch more than one county, though in most of them nearly all residents are in one; the tool reports how many respondents live in ZIPs where the assigned county holds less than 90% of the population.
@@ -127,32 +143,20 @@ python scripts/build_county_weather.py --perc-end 2024-07 --perc-base-years 3
 | `se_` | NOAA Storm Events database | days with heat, cold, winter storm, tornado, hail and thunderstorm wind, flood, tropical, wildfire and drought events; deaths; damage in millions of nominal USD |
 | `nc_` | NOAA nClimDiv county temperature | mean temperature anomaly relative to 1991–2020; months with unusually high maximum or low minimum temperature relative to the county's own 1991–2020 record; summer maximum and winter minimum temperature |
 | `fema_` | OpenFEMA Disaster Declarations Summaries | declarations naming the county, all types and by incident type |
-| `pc_` | nClimDiv, Storm Events, US Drought Monitor | the 12 months before the survey compared with the preceding years, matched to the SPEER perception items (below) |
+| `pc_` | nClimDiv, Storm Events, US Drought Monitor | the 12 months before the survey compared with the preceding years, for comparison with questions on perceived weather change (below) |
 
-### SPEER standard controls
+### Measured counterparts to perceived weather change
 
-The built-in predictor set enters every term as a single slope, in this order: social orientation (`S_Moderate_d`, `S_Conservative_d`; reference liberal), party (`Independent_d`, `Republican_d`; reference Democrat), `BibLit_d`, `Attend`, `Evangelical_d`, `Bachelors_d`, age and mean-centered age squared (`AgeNum`, `McAgeSq`), `Woman_d`, race and ethnicity (`Black_d`, `Hispanic_d`, `OthRace_d`; reference White), `Married_d`, `Children_d`, `ZIncome`, `Rural_d`, `Urban_d` (reference suburban) and `South_d`, weighted by `Weight`. Two further sets add `POP_Trust`, `CCWS_Individualism_s` and `FR_s`, or `CC_Belief`. Display labels for these and other SPEER columns come from `window.SPEER_LABELS` in `js/presets.js`.
+Some surveys ask whether kinds of weather happened more or less often around the respondent in the last twelve months than in the last few years. The `pc_` variables make the same comparison for each county: the 12 months ending at `--perc-end` (the last full month before fieldwork) against the mean of the `--perc-base-years` 12-month blocks before that (default 5). Every `pc_` variable is oriented so that a positive value means more of the event recently. They are built only when `--perc-end` is given (in the GitHub workflow, the "last full month" box).
 
-### Measured counterparts to the perception items
-
-SPEER Q15 (`WxPerc_*`) asks whether four kinds of events happened more or less often in the area around the respondent "in the last twelve months, as compared to the last few years", on a scale from 1 (definitely less frequently) to 5 (definitely more frequently). The `pc_` variables measure the same comparison for each county: the 12 months ending at `--perc-end` (default July 2024, the last full month before fieldwork began on August 16, 2024) against the mean of the `--perc-base-years` 12-month blocks before that (default 5, so August 2018 to July 2023). Every `pc_` variable is oriented so that a positive value means more of the event recently, the same direction as a high `WxPerc` answer.
-
-| Survey item | Measured counterparts |
+| Perceived change in | Measured counterparts |
 |---|---|
-| `WxPerc_RainFlood` | `pc_precip_pct` (percent change in 12-month precipitation), `pc_flood_days_more` (change in flood event-days) |
-| `WxPerc_HotHeat` | `pc_tmax_warmer_f` (change in mean daily maximum temperature), `pc_heat_days_more` (change in heat event-days) |
-| `WxPerc_ColdWinter` | `pc_winter_colder_f` (how much colder the December–February minimum was than in the baseline winters), `pc_coldwinter_days_more` (change in cold and winter storm event-days) |
-| `WxPerc_Droughts` | `pc_drought_area_more` (change in mean percent of county area in D1 or worse), `pc_drought_days_more` (change in drought event-days) |
+| Rain and floods | `pc_precip_pct` (percent change in 12-month precipitation), `pc_flood_days_more` (change in flood event-days) |
+| Heat | `pc_tmax_warmer_f` (change in mean daily maximum temperature), `pc_heat_days_more` (change in heat event-days) |
+| Cold and winter storms | `pc_winter_colder_f` (how much colder the December–February minimum was than in the baseline winters), `pc_coldwinter_days_more` (change in cold and winter storm event-days) |
+| Drought | `pc_drought_area_more` (change in mean percent of county area in D1 or worse), `pc_drought_days_more` (change in drought event-days) |
 
-In SPEER, a `WxPerc` item can be chosen as the outcome and its measured counterparts added as county predictors with county-clustered standard errors, which tests how closely perception follows the measured record once the socioeconomic predictors are held constant. The residual map then shows where people perceived more or less change than both their characteristics and their county's measured weather predict. Q16 (`WxFut_*`) asks about the next five years and has no measured counterpart.
-
-Some properties of these sources that bear on interpretation:
-
-- Heat and cold events in Storm Events are mostly reported by NWS forecast zone, not by county. The script maps zones to counties with the current NWS zone–county correlation file, and splits zone deaths and damage evenly across the zone's counties. Zone boundaries have changed over the years, and the script reports how many zones it could not match.
-- Storm Events reporting practice differs between NWS offices, especially for heat, so neighboring counties served by different offices can show different counts for similar conditions.
-- The nClimDiv hot and cold month counts are measured against each county's own history, so they describe how unusual recent years were for that place. The summer and winter temperature variables describe how hot or cold the place is in absolute terms.
-- FEMA declarations reflect state requests and federal decisions as well as the hazard itself. Statewide records and the 2020 Biological (COVID-19) declarations are excluded.
-- Connecticut's planning regions replaced its counties in 2022. The county map, the ZIP file and nClimDiv all use the older eight counties.
+A perception item can be chosen as the outcome and its measured counterparts added as county predictors with county-clustered standard errors, which tests how closely perception follows the measured record once the other predictors are held constant. Questions about the future have no measured counterpart.
 
 ## Sample file
 
@@ -163,7 +167,7 @@ Some properties of these sources that bear on interpretation:
 ```
 index.html, css/, js/          the tool: js/stats.js (regression, standard errors, Moran's I),
                                js/boost.js (boosted trees), js/treeshap.js (TreeSHAP),
-                               js/presets.js (predictor sets and labels), js/app.js (interface)
+                               js/presets.js (empty defaults; format for project settings), js/app.js (interface)
 tests/                         validation scripts (see Tests)
 data/counties-albers-10m.json  county outlines from us-atlas 3.0.1
 data/zip_county.csv            ZIP code to county lookup (rebuilt by scripts/build_zip_county.py)

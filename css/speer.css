@@ -248,3 +248,23 @@ input[type=number] { font: inherit; font-size: 14px; padding: 5px 6px; border: 1
 details.regions { margin-top: 10px; font-size: 13px; }
 #region-plot { width: 100%; height: auto; display: block; max-width: 720px; }
 #region-plot text { font-size: 11px; fill: var(--ink); }
+
+/* ---------- questions / codebook ---------- */
+.q-layout { display: grid; grid-template-columns: minmax(240px, 340px) 1fr; gap: 20px; }
+.q-list { max-height: 640px; overflow-y: auto; margin-top: 6px; border: 1px solid var(--rule); border-radius: var(--radius-s); }
+.q-block { font-size: 12px; font-weight: 600; color: var(--slate); background: var(--paper); padding: 6px 8px; position: sticky; top: 0; }
+.q-item { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--paper); border-radius: 0; background: #fff; color: var(--ink); padding: 6px 8px; font-size: 13px; }
+.q-item:hover, .q-item[aria-current="true"] { background: var(--storm-soft); }
+.q-item .col { color: var(--slate); font-size: 11px; display: block; }
+.q-detail h3 { margin: 0 0 6px; }
+.q-detail .qtext { font-size: 15px; line-height: 1.5; max-width: 80ch; margin: 0 0 6px; }
+.q-detail .qitem { font-size: 15px; font-weight: 600; margin: 0 0 10px; max-width: 80ch; }
+.q-detail .meta { font-size: 12px; color: var(--slate); margin-bottom: 10px; }
+.q-detail .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.q-detail table.opts { width: auto; min-width: 280px; margin: 6px 0 10px; }
+.q-inline { font-size: 12px; color: var(--ink); margin-top: 6px; line-height: 1.45; }
+.q-inline .qnum { font-weight: 600; color: var(--storm); }
+.q-inline .scale { color: var(--slate); display: block; margin-top: 2px; }
+#q-dist { width: 100%; height: auto; display: block; max-width: 680px; }
+#q-dist text { font-size: 11px; fill: var(--ink); }
+@media (max-width: 900px) { .q-layout { grid-template-columns: 1fr; } }

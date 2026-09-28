@@ -31,6 +31,15 @@
       <label class="field">Codes to treat as missing
         <input type="text" id="missing-codes" placeholder="e.g. 98, 99, Refused">
       </label>
+      <div class="field">
+        <span class="field-label">Project files (codebook and settings)</span>
+        <label class="drop small" id="drop-project" tabindex="0">
+          <input type="file" id="file-project" accept=".csv,.json,text/csv,application/json" multiple hidden>
+          <span class="drop-main">Drop a codebook (.csv) and/or project settings (.json)</span>
+        </label>
+        <label class="check-line"><input type="checkbox" id="remember-project"> Remember in this browser</label>
+        <p class="status" id="project-status"></p>
+      </div>
       <details class="computed">
         <summary>Add a computed column</summary>
         <label class="field">Calculation
@@ -44,7 +53,7 @@
         </label>
         <label class="field">A <select id="cc-a"></select></label>
         <label class="field" id="cc-b-wrap">B <select id="cc-b"></select></label>
-        <label class="field">New column name <input type="text" id="cc-name" placeholder="e.g. NRG_CCdiff"></label>
+        <label class="field">New column name <input type="text" id="cc-name" placeholder="e.g. item_a_minus_b"></label>
         <button type="button" id="cc-add">Add column</button>
         <p class="status" id="cc-status"></p>
       </details>
@@ -83,6 +92,7 @@
       <label class="field">Outcome
         <select id="dv-col"></select>
       </label>
+      <div class="q-inline" id="dv-question"></div>
       <div class="seg" role="radiogroup" aria-label="Outcome type">
         <label><input type="radio" name="dv-kind" value="linear" checked> Scale (linear)</label>
         <label><input type="radio" name="dv-kind" value="logit"> Yes/no (logistic)</label>
@@ -168,6 +178,7 @@
     </figure>
 
     <div class="tabs" role="tablist" aria-label="Analyses">
+      <button type="button" role="tab" data-tab="questions" aria-selected="false">Questions</button>
       <button type="button" role="tab" data-tab="model" aria-selected="true">Model</button>
       <button type="button" role="tab" data-tab="interaction" aria-selected="false">Interaction</button>
       <button type="button" role="tab" data-tab="groups" aria-selected="false">Group comparison</button>
@@ -176,10 +187,23 @@
       <button type="button" role="tab" data-tab="county" aria-selected="false">County and weather</button>
     </div>
 
+    <section class="panel tabpanel" id="tab-questions" role="tabpanel" hidden>
+      <div class="q-layout">
+        <div class="q-list-col">
+          <input type="search" id="q-search" placeholder="Search question text or column name" aria-label="Search questions">
+          <div class="q-list" id="q-list"></div>
+        </div>
+        <div class="q-detail" id="q-detail">
+          <p class="summary">Choose a question on the left to see its wording, answer options and the weighted distribution of answers.</p>
+        </div>
+      </div>
+    </section>
+
     <section class="panel tabpanel" id="tab-model" role="tabpanel">
       <div class="two-col">
         <div>
           <h3>Outcome</h3>
+          <div class="q-inline" id="dv-question-full"></div>
           <div id="dv-desc" class="summary">Choose an outcome in step 4.</div>
           <svg id="dv-hist" role="img" aria-label="Distribution of the outcome"></svg>
         </div>
@@ -227,7 +251,7 @@
           <select id="grp-by"></select>
         </label>
         <label class="field">Group labels (optional)
-          <input type="text" id="grp-labels" placeholder="1=Democrat, 2=Independent, 3=Republican">
+          <input type="text" id="grp-labels" placeholder="1=First group, 2=Second group">
         </label>
         <label class="field">Count as favorable
           <span class="pair-inline"><select id="grp-op"><option value=">=">at least</option><option value="<=">at most</option></select>

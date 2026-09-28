@@ -54,21 +54,38 @@
     lab.addEventListener('drop', e => e.dataTransfer.files[0] && onFile(e.dataTransfer.files[0]));
   }
 
+  function wireDropMulti(labelId, inputId, onFiles) {
+    const lab = $(labelId), inp = $(inputId);
+    lab.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inp.click(); } });
+    inp.addEventListener('change', () => inp.files.length && onFiles([...inp.files]));
+    ['dragenter', 'dragover'].forEach(t => lab.addEventListener(t, e => { e.preventDefault(); lab.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach(t => lab.addEventListener(t, e => { e.preventDefault(); lab.classList.remove('over'); }));
+    lab.addEventListener('drop', e => e.dataTransfer.files.length && onFiles([...e.dataTransfer.files]));
+  }
+
   wireDrop('drop-survey', 'file-survey', file => {
     if (/\.xlsx?$/i.test(file.name)) return readExcel(file);
+    readCsv(file, 'UTF-8');
+  });
+
+  // Excel on Windows saves CSV files in the Windows-1252 encoding; if UTF-8 turns up
+  // unreadable characters, the file is read again as Windows-1252.
+  function readCsv(file, encoding) {
     const rows = []; let fields = null;
     busy(`Reading ${file.name}…`);
     Papa.parse(file, {
-      header: true, skipEmptyLines: true, dynamicTyping: false, chunkSize: 512 * 1024,
+      header: true, skipEmptyLines: true, dynamicTyping: false, chunkSize: 512 * 1024, encoding,
       chunk: res => {
         if (!fields) fields = res.meta.fields;
         for (const r of res.data) rows.push(r);
         busy(`Reading ${file.name}: ${rows.length.toLocaleString()} rows so far…`);
       },
       complete: async () => {
+        const bad = (fields || []).some(f => f.includes('\uFFFD')) || rows.some(r => Object.values(r).some(v => typeof v === 'string' && v.includes('\uFFFD')));
+        if (bad && encoding === 'UTF-8') return readCsv(file, 'windows-1252');
         S.rows = rows; S.cols = (fields || []).filter(c => c !== '' && c != null);
         S.fileName = file.name; S.fit = null;
-        $('survey-status').textContent = `${file.name}: ${S.rows.length.toLocaleString()} rows, ${S.cols.length} columns`;
+        $('survey-status').textContent = `${file.name}: ${S.rows.length.toLocaleString()} rows, ${S.cols.length} columns` + (encoding !== 'UTF-8' ? ' (read as Windows-1252 text)' : '');
         await onSurveyLoaded();
       },
       error: err => {
@@ -76,7 +93,7 @@
         fail(`Could not read ${file.name}: ${err.message}`);
       },
     });
-  });
+  }
 
   wireDrop('drop-weather', 'file-weather', file => {
     Papa.parse(file, { header: true, skipEmptyLines: true, complete: res => setWeather(res, file.name) });
@@ -123,7 +140,7 @@
     $('step-place').removeAttribute('data-locked');
     $('step-model').removeAttribute('data-locked');
     const find = re => S.cols.find(c => re.test(c));
-    const zip = find(/zip|postal/i) || find(/^Q13$/i), fips = find(/fips|county/i);
+    const zip = find(/zip|postal/i), fips = find(/fips|county/i);
     fillSelect($('loc-col'), S.cols, { none: 'Choose a column', pick: zip || fips });
     fillSelect($('state-col'), S.cols, { none: 'None', pick: find(/^state$/i) });
     document.querySelector(`input[name=loc-kind][value=${!zip && fips ? 'fips' : 'zip'}]`).checked = true;
@@ -132,9 +149,9 @@
     S.ivOn = new Set(); S.ivKind = {}; S.labels = {};
     busy(`Checking ${S.cols.length} columns…`); await tick();
     refreshIvKinds();
-    const firstFit = allPresets().findIndex(p => p.predictors.filter(q => S.cols.includes(q.col)).length >= p.predictors.length * 0.75);
-    if (firstFit >= 0) { $('preset').value = String(firstFit); applyPreset(); } else { $('preset').value = ''; $('preset-note').textContent = ''; }
-    fillSelect($('grp-by'), S.cols, { none: 'Choose a column', pick: S.cols.find(c => c === 'Party3') });
+    autoPreset();
+    fillSelect($('grp-by'), S.cols, { none: 'Choose a column' });
+    refreshQuestionViews();
     grpOn.clear(); shapOn.clear(); SH = null; renderShapCands(); fillInteractionMenus(); fillComputedMenus(); renderGroupItems(); describeOutcome();
     busy('Placing respondents in counties…'); await tick();
     await placeRespondents();
@@ -160,7 +177,7 @@
     $('iv-list').innerHTML = S.cols
       .filter(c => c !== dv && c !== wt && !locCols.has(c) && c.toLowerCase().includes(f))
       .map(c => `<div class="iv-row"><input type="checkbox" data-col="${esc(c)}" ${S.ivOn.has(c) ? 'checked' : ''} aria-label="Use ${esc(c)}">
-        <span class="name" title="${esc(c)}">${esc(c)}${labelOf(c) !== c ? ` <span class="label">${esc(labelOf(c))}</span>` : ''}</span>
+        <span class="name" title="${esc(questionTitle(c))}">${esc(c)}${labelOf(c) !== c ? ` <span class="label">${esc(labelOf(c))}</span>` : ''}</span>
         <button type="button" class="type" data-col="${esc(c)}" data-kind="${S.ivKind[c]}">${S.ivKind[c] === 'number' ? 'number' : 'category'}</button></div>`)
       .join('');
   }
@@ -208,6 +225,10 @@
     renderIvList();
     $('preset-note').innerHTML = `${S.ivOn.size} predictors set. ${p.note ? esc(p.note) : ''}` +
       (missing.length ? ` <span class="warn">Not in this file: ${missing.map(esc).join(', ')}.</span>` : '');
+  }
+  function autoPreset() {
+    const firstFit = allPresets().findIndex(p => p.predictors.length && p.predictors.filter(q => S.cols.includes(q.col)).length >= p.predictors.length * 0.75);
+    if (firstFit >= 0) { $('preset').value = String(firstFit); applyPreset(); } else { $('preset').value = ''; $('preset-note').textContent = ''; }
   }
   $('preset').addEventListener('change', applyPreset);
   $('clear-ivs').addEventListener('click', () => { S.ivOn = new Set(); S.labels = {}; $('preset').value = ''; $('preset-note').textContent = ''; renderIvList(); });
@@ -852,7 +873,7 @@
   const regionOf = ab => { const d = divisionOf(ab); return Object.keys(REGION).find(r => REGION[r].includes(d)); };
 
   function scaleWords() {
-    const f = S.fit, sc = (window.SPEER_SCALES || {})[f.dv];
+    const f = S.fit, sc = scaleEnds(f.dv);
     const vals = f.idx.map(i => num(S.rows[i][f.dv])).filter(isFinite);
     const lo = d3.min(vals), hi = d3.max(vals);
     if (f.kind === 'logit') return { up: 'a larger share answering yes than predicted', down: 'a smaller share than predicted', span: 1, lo: 0, hi: 1, scaleTxt: 'a 0–1 probability scale' };
@@ -877,6 +898,8 @@
     } else colored = [...S.county.values()].filter(c => c.n >= mn).length;
     const total = S.countyName.size;
     const ps = [];
+    const qh = questionHTML(f.dv);
+    if (qh) ps.push(`<p class="q-inline">Outcome: ${qh}</p>`);
     ps.push(`<p><span class="swatch" style="background:#A33A2E"></span><b>Red</b>: respondents there gave ${esc(W.up)}, given their characteristics in the model. <span class="swatch" style="background:#2C5D8A"></span><b>Blue</b>: ${esc(W.down)}. Near-white: close to what the model predicts.</p>`);
     ps.push(`<p>The residual is each respondent's answer minus the answer the model of <b>${esc(labelOf(f.dv))}</b> predicts from their ${f.ivs.length} predictors. The color range of ±${fmt(range, 2)} is ${pct != null ? `${pct}% of ` : ''}${W.scaleTxt}; residuals beyond it take the darkest color.</p>`);
     if (L === 'smooth') ps.push(`<p>Each county's color is a weighted average of the residuals of nearby respondents: a respondent about ${Math.round(bw * 1.1774)} km away counts half as much as one in the county, and those beyond ${bw * 3} km do not count (Gaussian weighting, ${bw} km smoothing distance). Neighboring counties share most of the same respondents, so the map shows regional patterns and not county-by-county differences. ${nResp.toLocaleString()} respondents, ${colored.toLocaleString()} of ${total.toLocaleString()} counties colored.${support} Hatched counties have fewer than ${mn} weighted respondent${mn > 1 ? 's' : ''} nearby.</p>`);
@@ -939,11 +962,263 @@
   $('region-kind').addEventListener('change', drawRegions);
   $('region-min').addEventListener('change', drawRegions);
 
+  // ---------------- codebook (question text) ----------------
+  // S.cb: column -> { question, block, text, item, options: [[code, label], ...] }
+  function parseCodebook(txt) {
+    const m = new Map();
+    Papa.parse(txt, { header: true, skipEmptyLines: true }).data.forEach(r => {
+      if (!r.column) return;
+      const options = String(r.options || '').split(/;\s*/).map(p => { const k = p.indexOf('='); return k > 0 ? [Number(p.slice(0, k).trim()), p.slice(k + 1).trim()] : null; }).filter(o => o && isFinite(o[0]));
+      m.set(r.column.trim(), { question: r.question || '', block: r.block || '', text: r.text || '', item: r.item || '', options });
+    });
+    return m;
+  }
+  // Project files stay on this computer: they are read by the browser and, if
+  // "Remember in this browser" is ticked, kept in this browser's local storage.
+  const PROJ_KEY = 'SPEER-project', CB_KEY = 'SPEER-codebook';
+  const proj = { name: '', cbName: '' };
+
+  function applyProject(obj, name) {
+    window.SPEER_PRESETS = Array.isArray(obj.presets) ? obj.presets : [];
+    window.SPEER_LABELS = obj.labels || {};
+    window.SPEER_SCALES = obj.scales || {};
+    proj.name = obj.name || name || 'project settings';
+    renderPresetMenu();
+    if (S.rows.length && !S.ivOn.size) autoPreset();
+    if (S.rows.length) refreshColumnMenus();
+  }
+  function applyCodebook(txt, name) { S.cbText = txt; S.cb = parseCodebook(txt); proj.cbName = name; refreshQuestionViews(); }
+
+  function projectStatus(extra = '') {
+    const parts = [];
+    if (S.cb && S.cb.size) parts.push(`codebook with ${S.cb.size} columns (${esc(proj.cbName)})`);
+    if (proj.name) parts.push(`${esc(proj.name)}: ${(window.SPEER_PRESETS || []).length} predictor sets, ${Object.keys(window.SPEER_LABELS || {}).length} labels`);
+    const stored = (() => { try { return !!(localStorage.getItem(PROJ_KEY) || localStorage.getItem(CB_KEY)); } catch (e) { return false; } })();
+    $('project-status').innerHTML = (parts.length ? 'Loaded: ' + parts.join('; ') + '.' : 'No project files loaded.') +
+      (stored ? ' Remembered in this browser. <button type="button" class="link" id="forget-project">Forget</button>' : '') + extra;
+  }
+
+  function remember(key, txt) {
+    if (!$('remember-project').checked) return;
+    try { localStorage.setItem(key, txt); } catch (e) { projectStatus(' <span class="warn">This browser would not store the files.</span>'); }
+  }
+
+  wireDropMulti('drop-project', 'file-project', files => {
+    files.forEach(file => {
+      const fr = new FileReader();
+      fr.onload = () => {
+        const txt = fr.result;
+        if (/\.json$/i.test(file.name)) {
+          try { applyProject(JSON.parse(txt), file.name); remember(PROJ_KEY, txt); }
+          catch (e) { projectStatus(` <span class="err">${esc(file.name)} is not valid JSON: ${esc(e.message)}</span>`); return; }
+        } else { applyCodebook(txt, file.name); remember(CB_KEY, JSON.stringify({ name: file.name, txt })); }
+        projectStatus();
+      };
+      fr.readAsText(file);
+    });
+  });
+
+  $('remember-project').addEventListener('change', e => {
+    if (!e.target.checked) return;
+    // store whatever is already loaded
+    try {
+      if (proj.name) localStorage.setItem(PROJ_KEY, JSON.stringify({ name: proj.name, presets: window.SPEER_PRESETS, labels: window.SPEER_LABELS, scales: window.SPEER_SCALES }));
+      if (S.cb && S.cb.size && S.cbText) localStorage.setItem(CB_KEY, JSON.stringify({ name: proj.cbName, txt: S.cbText }));
+    } catch (err) { /* reported on next load */ }
+    projectStatus();
+  });
+
+  document.addEventListener('click', e => {
+    if (e.target.id !== 'forget-project') return;
+    try { localStorage.removeItem(PROJ_KEY); localStorage.removeItem(CB_KEY); } catch (err) { /* nothing stored */ }
+    $('remember-project').checked = false;
+    projectStatus(' Removed from this browser; the files stay loaded until the page is reloaded.');
+  });
+
+  async function loadDefaultCodebook() {
+    // only files remembered in this browser; nothing survey-specific is fetched from the site
+    S.cb = new Map();
+    try {
+      const p = localStorage.getItem(PROJ_KEY), c = localStorage.getItem(CB_KEY);
+      if (p) applyProject(JSON.parse(p), 'remembered settings');
+      if (c) { const o = JSON.parse(c); applyCodebook(o.txt, o.name); S.cbText = o.txt; }
+      if (p || c) $('remember-project').checked = true;
+    } catch (e) { /* storage unavailable */ }
+    projectStatus(); refreshQuestionViews();
+  }
+
+  // entry for a column, falling back to its base column for derived names (_d, _s, _r, _l, _c)
+  const SUFFIX = { d: 'a 0/1 indicator derived from', s: 'a scale score built from items including', r: 'a recoded version of', l: 'a recoded version of', c: 'a centered version of' };
+  function cbFor(col) {
+    if (!S.cb || !col) return null;
+    if (S.cb.has(col)) return { ...S.cb.get(col), col };
+    const m = col.match(/^(.*)_([dsrlc])\.?$/);
+    if (m && S.cb.has(m[1])) return { ...S.cb.get(m[1]), col, derivedFrom: m[1], derivedHow: SUFFIX[m[2]], options: [] };
+    return null;
+  }
+
+  // do the values in the file match the questionnaire's answer codes?
+  function codingCheck(col, e) {
+    if (!e || !e.options.length || !S.rows.length) return { ok: !!(e && e.options.length), obs: [] };
+    const miss = missingSet(), obs = new Set();
+    for (const r of S.rows) { if (isMissing(r[col], miss)) continue; const v = num(r[col]); if (isFinite(v)) obs.add(v); if (obs.size > 60) break; }
+    const codes = new Set(e.options.map(o => o[0]));
+    const ok = obs.size > 0 && [...obs].every(v => codes.has(v));
+    return { ok, obs: [...obs].sort((a, b) => a - b), codes: [...codes].sort((a, b) => a - b) };
+  }
+
+  function optionLabel(e, v) { const o = e && e.options.find(p => p[0] === v); return o ? o[1] : null; }
+
+  function questionHTML(col, { full = false } = {}) {
+    const e = cbFor(col);
+    if (!e) return '';
+    const head = `<span class="qnum">${esc(e.question)}</span> ${esc(e.text)}${e.item ? ` <i>${esc(e.item)}</i>` : ''}`;
+    let scale = '';
+    if (e.derivedFrom) scale = `<span class="scale">${esc(col)} is ${esc(e.derivedHow)} ${esc(e.derivedFrom)}.</span>`;
+    else if (e.options.length) {
+      const chk = codingCheck(col, e), sorted = e.options.slice().sort((a, b) => a[0] - b[0]);
+      const list = full ? sorted.map(o => `${o[0]} = ${esc(o[1])}`).join('; ') : `${sorted[0][0]} = ${esc(sorted[0][1])} … ${sorted[sorted.length - 1][0]} = ${esc(sorted[sorted.length - 1][1])}`;
+      scale = `<span class="scale">${list}</span>` + (!chk.ok && chk.obs.length ? `<span class="scale warn">Values in the file (${chk.obs.slice(0, 12).join(', ')}${chk.obs.length > 12 ? ', …' : ''}) do not match the questionnaire codes, so the file appears to be recoded and these labels may not line up.</span>` : '');
+    }
+    return head + scale;
+  }
+
+  function questionTitle(col) {
+    const e = cbFor(col); if (!e) return col;
+    return `${col}: ${e.question} ${e.text}${e.item ? ' ' + e.item : ''}`;
+  }
+
+  // words for the low and high ends of an outcome, from the codebook when its codes match the file
+  function scaleEnds(col) {
+    const e = cbFor(col);
+    if (e && e.options.length && codingCheck(col, e).ok) {
+      const s = e.options.slice().sort((a, b) => a[0] - b[0]);
+      return { low: s[0][1], high: s[s.length - 1][1] };
+    }
+    return (window.SPEER_SCALES || {})[col] || null;
+  }
+
+  function showOutcomeQuestion() {
+    const dv = $('dv-col').value;
+    $('dv-question').innerHTML = dv ? questionHTML(dv) : '';
+    $('dv-question-full').innerHTML = dv ? questionHTML(dv, { full: true }) : '';
+  }
+  $('dv-col').addEventListener('change', showOutcomeQuestion);
+
+  // ---------------- Questions tab ----------------
+  let qCurrent = null;
+  function renderQuestionList() {
+    const box = $('q-list');
+    if (!S.cb || !S.cb.size) { box.innerHTML = '<p class="summary" style="padding:8px">No codebook loaded.</p>'; return; }
+    const f = $('q-search').value.toLowerCase().trim();
+    const inFile = new Set(S.cols);
+    const cols = [...S.cb.keys()].filter(c => !S.rows.length || inFile.has(c)).filter(c => {
+      if (!f) return true; const e = S.cb.get(c);
+      return (c + ' ' + e.question + ' ' + e.text + ' ' + e.item + ' ' + labelOf(c)).toLowerCase().includes(f);
+    });
+    let html = '', last = null;
+    cols.forEach(c => {
+      const e = S.cb.get(c);
+      if (e.block !== last) { html += `<div class="q-block">${esc(e.block || 'Other')}</div>`; last = e.block; }
+      const short = (e.item || e.text); 
+      html += `<button type="button" class="q-item" data-col="${esc(c)}" aria-current="${c === qCurrent}">${esc(e.question)} ${esc(short.length > 90 ? short.slice(0, 89) + '…' : short)}<span class="col">${esc(c)}</span></button>`;
+    });
+    box.innerHTML = html || '<p class="summary" style="padding:8px">No questions match.</p>';
+  }
+  $('q-search').addEventListener('input', renderQuestionList);
+  $('q-list').addEventListener('click', e => { const b = e.target.closest('.q-item'); if (b) { qCurrent = b.dataset.col; renderQuestionList(); renderQuestionDetail(); } });
+
+  function renderQuestionDetail() {
+    const col = qCurrent, e = cbFor(col), box = $('q-detail');
+    if (!e) return;
+    const chk = codingCheck(col, e);
+    let html = `<h3>${esc(e.question)} <span class="summary">${esc(col)}${labelOf(col) !== col ? `, shown as “${esc(labelOf(col))}”` : ''}</span></h3>
+      <div class="meta">${esc(e.block)}</div>
+      <p class="qtext">${esc(e.text)}</p>${e.item ? `<p class="qitem">${esc(e.item)}</p>` : ''}`;
+    if (e.options.length) html += `<table class="opts"><thead><tr><th class="num">Code</th><th>Answer</th></tr></thead><tbody>${e.options.slice().sort((a, b) => a[0] - b[0]).map(o => `<tr><td class="num">${o[0]}</td><td>${esc(o[1])}</td></tr>`).join('')}</tbody></table>`;
+    if (!S.rows.length) html += '<p class="summary">Load the survey to see how respondents answered.</p>';
+    else if (!S.cols.includes(col)) html += `<p class="summary warn">${esc(col)} is not a column in the loaded file.</p>`;
+    else {
+      if (e.options.length && !chk.ok) html += `<p class="summary warn">Values in the file (${chk.obs.slice(0, 15).join(', ')}) do not match the questionnaire codes (${chk.codes.join(', ')}), so the file appears to be recoded. The chart shows the values in the file.</p>`;
+      html += `<div class="actions">
+        <button type="button" data-act="outcome">Use as the outcome</button>
+        <button type="button" data-act="predictor">Add as a predictor</button>
+        <button type="button" data-act="group">Compare across groups</button>
+        <button type="button" data-act="shap">Add as a SHAP candidate</button>
+      </div><div id="q-summary" class="summary"></div><svg id="q-dist" role="img" aria-label="Distribution of answers"></svg>`;
+    }
+    box.innerHTML = html;
+    if (S.rows.length && S.cols.includes(col)) drawQuestionDist(col, e, chk.ok);
+  }
+
+  function drawQuestionDist(col, e, labelsOk) {
+    const miss = missingSet(), wt = $('wt-col').value, counts = new Map();
+    let n = 0, nMiss = 0, sw = 0, text = false;
+    S.rows.forEach(r => {
+      if (isMissing(r[col], miss)) { nMiss++; return; }
+      const v = num(r[col]); if (!isFinite(v)) { text = true; return; }
+      const w = wt ? num(r[wt]) : 1; if (!isFinite(w) || w <= 0) return;
+      const o = counts.get(v) || { w: 0, n: 0 }; o.w += w; o.n++; counts.set(v, o); n++; sw += w;
+    });
+    const g = d3.select('#q-dist'); g.selectAll('*').remove();
+    if (text && !counts.size) { $('q-summary').textContent = 'This column holds text answers, so there is no distribution to chart.'; return; }
+    const vals = [...counts.keys()].sort((a, b) => a - b);
+    if (vals.length > 25) {
+      const all = []; S.rows.forEach(r => { if (!isMissing(r[col], miss)) { const v = num(r[col]); if (isFinite(v)) all.push(v); } });
+      const bins = d3.bin().thresholds(20)(all);
+      $('q-summary').textContent = `${n.toLocaleString()} answers (${nMiss.toLocaleString()} missing), unweighted counts in 20 bins. Mean ${fmt(d3.mean(all))}, SD ${fmt(d3.deviation(all))}.`;
+      const W = 620, H = 220, m = { l: 48, r: 10, t: 8, b: 30 };
+      g.attr('viewBox', `0 0 ${W} ${H}`);
+      const x = d3.scaleLinear().domain([bins[0].x0, bins[bins.length - 1].x1]).range([m.l, W - m.r]);
+      const y = d3.scaleLinear().domain([0, d3.max(bins, b => b.length)]).nice().range([H - m.b, m.t]);
+      g.append('g').attr('class', 'axis').attr('transform', `translate(0,${H - m.b})`).call(d3.axisBottom(x).ticks(8));
+      g.append('g').attr('class', 'axis').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4));
+      g.selectAll('rect.b').data(bins).join('rect').attr('x', b => x(b.x0) + 1).attr('width', b => Math.max(0, x(b.x1) - x(b.x0) - 2)).attr('y', b => y(b.length)).attr('height', b => y(0) - y(b.length)).attr('fill', '#0F5E66').attr('fill-opacity', 0.75);
+      return;
+    }
+    $('q-summary').textContent = `${n.toLocaleString()} answers (${nMiss.toLocaleString()} missing). Percent of respondents${wt ? ', weighted by ' + wt : ', unweighted'}; bars run from 0 to 100%.`;
+    const row = 24, W = 620, m = { l: 260, r: 60, t: 6, b: 30 }, H = m.t + vals.length * row + m.b;
+    g.attr('viewBox', `0 0 ${W} ${H}`);
+    const x = d3.scaleLinear().domain([0, 100]).range([m.l, W - m.r]), bottom = m.t + vals.length * row;
+    g.append('g').attr('class', 'axis').attr('transform', `translate(0,${bottom})`).call(d3.axisBottom(x).ticks(5).tickFormat(d => d + '%'));
+    vals.forEach((v, i) => {
+      const o = counts.get(v), pct = 100 * o.w / sw, y = m.t + i * row;
+      const lab = (labelsOk && optionLabel(e, v)) ? `${d3.format('~g')(v)} ${optionLabel(e, v)}` : d3.format('~g')(v);
+      g.append('text').attr('x', m.l - 8).attr('y', y + row / 2 + 4).attr('text-anchor', 'end').text(lab.length > 44 ? lab.slice(0, 43) + '…' : lab).append('title').text(lab);
+      g.append('rect').attr('x', x(0)).attr('y', y + 4).attr('width', x(pct) - x(0)).attr('height', row - 8).attr('fill', '#0F5E66').attr('fill-opacity', 0.8)
+        .append('title').text(`${lab}: ${pct.toFixed(1)}% (n = ${o.n})`);
+      g.append('text').attr('x', x(pct) + 4).attr('y', y + row / 2 + 4).text(`${pct.toFixed(1)}%`);
+    });
+  }
+
+  $('q-detail').addEventListener('click', e => {
+    const act = e.target.dataset.act; if (!act || !qCurrent) return;
+    const col = qCurrent, out = $('q-summary');
+    if (act === 'outcome') { $('dv-col').value = col; $('dv-col').dispatchEvent(new Event('change')); out.textContent = `${col} is now the outcome in step 4. Fit the model to map it.`; }
+    else if (act === 'predictor') { S.ivOn.add(col); renderIvList(); out.textContent = `${col} added to the predictors in step 4.`; }
+    else if (act === 'group') { grpOn.add(col); renderGroupItems(); showTab('groups'); }
+    else if (act === 'shap') { shapOn.add(col); renderShapCands(); out.textContent = `${col} added to the SHAP candidates.`; }
+  });
+
+  // group labels filled in from the codebook when the grouping column has answer options
+  $('grp-by').addEventListener('change', () => {
+    const col = $('grp-by').value, e = cbFor(col);
+    if (e && e.options.length && e.options.length <= 12 && codingCheck(col, e).ok)
+      $('grp-labels').value = e.options.slice().sort((a, b) => a[0] - b[0]).map(o => `${o[0]}=${o[1]}`).join(', ');
+  });
+
+  function refreshQuestionViews() {
+    renderQuestionList(); showOutcomeQuestion();
+    if (qCurrent) renderQuestionDetail();
+    if (S.rows.length) renderIvList();
+  }
+
   // ---------------- tabs ----------------
   function showTab(name) {
     document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === name ? 'true' : 'false'));
     document.querySelectorAll('.tabpanel').forEach(p => { p.hidden = p.id !== `tab-${name}`; });
     if (name === 'shap') renderShapCands();
+    if (name === 'questions') renderQuestionList();
   }
   document.querySelector('.tabs').addEventListener('click', e => { if (e.target.dataset.tab) showTab(e.target.dataset.tab); });
 
@@ -995,7 +1270,7 @@
   $('int-fit').addEventListener('click', async () => {
     const A = $('int-a').value, B = $('int-b').value, out = $('int-summary');
     const bail = msg => {
-      out.innerHTML = `<span class="err">${esc(msg)}</span>` + (/collinear/.test(msg) ? ' The moderator may duplicate predictors already in step 4 (for example Party3 alongside the Independent and Republican dummies); untick those and fit again.' : '');
+      out.innerHTML = `<span class="err">${esc(msg)}</span>` + (/collinear/.test(msg) ? ' The moderator may duplicate predictors already in step 4 (for example a party column alongside dummy variables for the same parties); untick those and fit again.' : '');
       $('int-table').innerHTML = ''; d3.select('#int-plot').selectAll('*').remove(); $('toast').hidden = true;
     };
     if (!A || !B || A === B) return bail('Choose two different columns.');
@@ -1083,7 +1358,7 @@
   function renderGroupItems() {
     const f = $('grp-filter').value.toLowerCase();
     $('grp-items').innerHTML = S.cols.filter(c => c.toLowerCase().includes(f) || labelOf(c).toLowerCase().includes(f))
-      .map(c => `<label class="wx-row"><input type="checkbox" data-col="${esc(c)}" ${grpOn.has(c) ? 'checked' : ''}><span class="name">${esc(c)}${labelOf(c) !== c ? ` <span class="label">${esc(labelOf(c))}</span>` : ''}</span></label>`).join('');
+      .map(c => `<label class="wx-row" title="${esc(questionTitle(c))}"><input type="checkbox" data-col="${esc(c)}" ${grpOn.has(c) ? 'checked' : ''}><span class="name">${esc(c)}${labelOf(c) !== c ? ` <span class="label">${esc(labelOf(c))}</span>` : ''}</span></label>`).join('');
   }
   $('grp-filter').addEventListener('input', renderGroupItems);
   $('grp-items').addEventListener('change', e => { const c = e.target.dataset.col; if (c) e.target.checked ? grpOn.add(c) : grpOn.delete(c); });
@@ -1251,7 +1526,7 @@
     const inModel = new Set(S.ivOn), dv = $('dv-col').value, wt = $('wt-col').value;
     $('shap-cands').innerHTML = S.cols.filter(c => c !== dv && c !== wt && !($('shap-use-ivs').checked && inModel.has(c)) &&
       (c.toLowerCase().includes(f) || labelOf(c).toLowerCase().includes(f)))
-      .map(c => `<label class="wx-row"><input type="checkbox" data-col="${esc(c)}" ${shapOn.has(c) ? 'checked' : ''}><span class="name">${esc(c)}${labelOf(c) !== c ? ` <span class="label">${esc(labelOf(c))}</span>` : ''}</span></label>`).join('');
+      .map(c => `<label class="wx-row" title="${esc(questionTitle(c))}"><input type="checkbox" data-col="${esc(c)}" ${shapOn.has(c) ? 'checked' : ''}><span class="name">${esc(c)}${labelOf(c) !== c ? ` <span class="label">${esc(labelOf(c))}</span>` : ''}</span></label>`).join('');
   }
   $('shap-filter').addEventListener('input', renderShapCands);
   $('shap-use-ivs').addEventListener('change', renderShapCands);
@@ -1528,4 +1803,5 @@
   mapReady.then(() => { $('toast').hidden = true; });
   placeRespondents();
   mapReady.then(loadDefaultWeather);
+  loadDefaultCodebook();
 })();

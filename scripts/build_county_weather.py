@@ -10,7 +10,7 @@ Three public sources, each optional:
           1991-2020 normal and counts of unusually hot and cold months.
   fema    OpenFEMA disaster declarations by county.
   perception
-          Variables matched to the SPEER weather perception items (Q15):
+          Variables matched to survey questions on perceived weather change:
           the 12 months before the survey compared with the preceding years,
           for precipitation, heat, winter cold and drought, from nClimDiv,
           Storm Events and the US Drought Monitor.
@@ -18,7 +18,8 @@ Three public sources, each optional:
 Uses only the Python standard library.
 
 Usage:
-    python scripts/build_county_weather.py                  # all sources, 2014-2023
+    python scripts/build_county_weather.py                  # 2014-2023, no perception variables
+    python scripts/build_county_weather.py --perc-end 2024-07   # also perception-matched variables
     python scripts/build_county_weather.py --start 2019 --end 2023
     python scripts/build_county_weather.py --sources climdiv fema
 
@@ -337,10 +338,10 @@ def fema(start, end):
     return out, desc
 
 
-# ---------------- matched to the perception questions ----------------
-# SPEER Q15 asks whether rain and floods, heat, cold and winter storms, and
-# droughts happened more or less often "in the last twelve months, as compared
-# to the last few years". Each variable below compares the 12 months ending at
+# ---------------- matched to perception questions ----------------
+# Some surveys ask whether rain and floods, heat, cold and winter storms, and
+# droughts happened more or less often in the last twelve months than in the
+# last few years. Each variable below makes that comparison for each county:
 # --perc-end with the mean of the --perc-base-years 12-month blocks before
 # them, oriented so that a positive value means "more" in the question's sense.
 
@@ -436,14 +437,14 @@ def perception(perc_end, base_years, zone_file):
         print(f"  US Drought Monitor download failed ({e}); pc_drought_area_more left out")
 
     desc = {
-        "pc_precip_pct": f"Precipitation {win} as percent above (+) or below (-) the mean 12-month total for {base} (nClimDiv); matches WxPerc_RainFlood",
-        "pc_flood_days_more": f"Flood event-days {win} minus the mean per 12 months for {base} (Storm Events); matches WxPerc_RainFlood",
-        "pc_tmax_warmer_f": f"Mean daily maximum temperature {win} minus {base}, degrees F (nClimDiv); matches WxPerc_HotHeat",
-        "pc_heat_days_more": f"Heat event-days {win} minus the mean per 12 months for {base} (Storm Events); matches WxPerc_HotHeat",
-        "pc_winter_colder_f": f"December-February mean daily minimum in {base} minus the winter in {win}, degrees F; positive means the recent winter was colder; matches WxPerc_ColdWinter",
-        "pc_coldwinter_days_more": f"Cold and winter storm event-days {win} minus the mean per 12 months for {base} (Storm Events); matches WxPerc_ColdWinter",
-        "pc_drought_days_more": f"Drought event-days {win} minus the mean per 12 months for {base} (Storm Events); matches WxPerc_Droughts",
-        "pc_drought_area_more": f"Mean weekly percent of county area in D1 or worse drought, {win} minus {base} (US Drought Monitor); matches WxPerc_Droughts",
+        "pc_precip_pct": f"Precipitation {win} as percent above (+) or below (-) the mean 12-month total for {base} (nClimDiv), for comparison with perceived change in rain and flooding",
+        "pc_flood_days_more": f"Flood event-days {win} minus the mean per 12 months for {base} (Storm Events), for comparison with perceived change in rain and flooding",
+        "pc_tmax_warmer_f": f"Mean daily maximum temperature {win} minus {base}, degrees F (nClimDiv), for comparison with perceived change in heat",
+        "pc_heat_days_more": f"Heat event-days {win} minus the mean per 12 months for {base} (Storm Events), for comparison with perceived change in heat",
+        "pc_winter_colder_f": f"December-February mean daily minimum in {base} minus the winter in {win}, degrees F; positive means the recent winter was colder, for comparison with perceived change in cold and winter storms",
+        "pc_coldwinter_days_more": f"Cold and winter storm event-days {win} minus the mean per 12 months for {base} (Storm Events), for comparison with perceived change in cold and winter storms",
+        "pc_drought_days_more": f"Drought event-days {win} minus the mean per 12 months for {base} (Storm Events), for comparison with perceived change in drought",
+        "pc_drought_area_more": f"Mean weekly percent of county area in D1 or worse drought, {win} minus {base} (US Drought Monitor), for comparison with perceived change in drought",
     }
     return out, desc
 
@@ -455,8 +456,8 @@ def main():
     ap.add_argument("--end", type=int, default=2023)
     ap.add_argument("--sources", nargs="+", default=["storm", "climdiv", "fema", "perception"],
                     choices=["storm", "climdiv", "fema", "perception"])
-    ap.add_argument("--perc-end", default="2024-07",
-                    help="last full month before the survey, YYYY-MM (SPEER fieldwork began August 16, 2024)")
+    ap.add_argument("--perc-end", default=None,
+                    help="last full month before the survey, YYYY-MM; the perception-matched variables are built only when this is given")
     ap.add_argument("--perc-base-years", type=int, default=5,
                     help="number of 12-month blocks before the recent year used as 'the last few years'")
     ap.add_argument("--zone-file", help="local NWS zone-county correlation file (bpDDmmYY.dbx)")
@@ -470,6 +471,9 @@ def main():
              ("perception", lambda: perception(args.perc_end, args.perc_base_years, args.zone_file))]
     for name, run in steps:
         if name not in args.sources:
+            continue
+        if name == "perception" and not args.perc_end:
+            print("Perception-matched variables skipped (no --perc-end given)")
             continue
         try:
             t, d = run()
